@@ -577,7 +577,7 @@ export default function App() {
         }
 
         // Blob
-        const usePhoto = isMe && playerNameRef.current === 'Player 1' && avatarImgRef.current
+        const usePhoto = player.name === 'Player 1' && avatarImgRef.current
         ctx.save()
         ctx.beginPath()
         ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2)
