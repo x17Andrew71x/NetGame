@@ -11,11 +11,11 @@ const socket = io(SERVER_URL, { autoConnect: false })
 
 const MAP_SIZE = 4000
 const PLAYER_NAMES = [
-  'Jones', 'Rashid', 'Kenner', 'Stafford', 'K Miller', 'Miller',
-  'Smith', 'Bellerose', 'Hunsaker', 'Wylie', 'Groesbeck', 'Bernstein',
-  'Belles', 'Leimer', 'Morrison', 'Lampe', 'Bronson', 'Barfuss',
-  'Simon', 'DenHann', 'Kirby', 'Rodriguez', 'Arndt', 'Siegrist',
-  'Nooren', 'Paice', 'Kroon', 'Brennan', 'Flanagan', 'Worgull',
+  'Arndt', 'Barfuss', 'Belles', 'Bellerose', 'Bernstein', 'Brennan',
+  'Bronson', 'DenHann', 'Flanagan', 'Groesbeck', 'Hunsaker', 'Jones',
+  'K Miller', 'Kenner', 'Kirby', 'Kroon', 'Lampe', 'Leimer',
+  'Miller', 'Morrison', 'Nooren', 'Paice', 'Rashid', 'Rodriguez',
+  'Siegrist', 'Simon', 'Smith', 'Stafford', 'Worgull', 'Wylie',
 ]
 const COLORS = ['#f97316', '#a855f7', '#ec4899', '#3b82f6', '#84cc16', '#14b8a6']
 const SEA_CREATURES = ['🐠', '🦈', '🐙', '🦑', '🐡', '🦞', '🦀', '🐬', '🦭', '🦐', '🐟', '🐋']
@@ -268,7 +268,10 @@ function makePellets() {
 
 export default function App() {
   const [screen, setScreen] = useState('login') // login | game | dead
-  const [playerName, setPlayerName] = useState(PLAYER_NAMES[0])
+  const [playerName, setPlayerName] = useState(() => {
+    const saved = localStorage.getItem('playerName')
+    return saved && PLAYER_NAMES.includes(saved) ? saved : PLAYER_NAMES[0]
+  })
   const [killedBy, setKilledBy] = useState('')
   const [myScore, setMyScore] = useState(0)
   const canvasRef = useRef(null)
@@ -286,6 +289,15 @@ export default function App() {
   const [deathLeaderboard, setDeathLeaderboard] = useState([])
   const [serverOnline, setServerOnline] = useState(true)
   const disconnectTimer = useRef(null)
+  const [showHint, setShowHint] = useState(false)
+
+  // Show control hint for 15s when game starts
+  useEffect(() => {
+    if (screen !== 'game') { setShowHint(false); return }
+    setShowHint(true)
+    const t = setTimeout(() => setShowHint(false), 15000)
+    return () => clearTimeout(t)
+  }, [screen])
 
   // Ping server every 3s on login screen to check if online
   useEffect(() => {
@@ -333,8 +345,11 @@ export default function App() {
 
   useEffect(() => { mutedRef.current = muted }, [muted])
 
-  // Keep playerNameRef in sync
-  useEffect(() => { playerNameRef.current = playerName }, [playerName])
+  // Keep playerNameRef in sync + persist selection
+  useEffect(() => {
+    playerNameRef.current = playerName
+    localStorage.setItem('playerName', playerName)
+  }, [playerName])
 
   // Preload player avatars
   useEffect(() => {
@@ -891,12 +906,19 @@ export default function App() {
     )
   }
 
+  const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+
   return (
     <div style={{ position: 'relative' }}>
       <canvas ref={canvasRef} className="game-canvas" />
-      <button className="mute-btn" onClick={() => setMuted(m => !m)}>
+      <button className="mute-btn mute-bottom-right" onClick={() => setMuted(m => !m)}>
         {muted ? '🔇' : '🔊'}
       </button>
+      {showHint && (
+        <div className="control-hint">
+          {isMobile ? 'Tap screen to change direction' : 'Move mouse to change direction'}
+        </div>
+      )}
     </div>
   )
 }
