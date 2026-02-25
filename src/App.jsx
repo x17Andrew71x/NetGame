@@ -10,7 +10,13 @@ const SERVER_URL = import.meta.env.DEV ? 'http://localhost:3000' : API_URL
 const socket = io(SERVER_URL, { autoConnect: false })
 
 const MAP_SIZE = 4000
-const PLAYER_NAMES = ['Player 1', 'Player 2', 'Player 3', 'Player 4', 'Player 5', 'Player 6']
+const PLAYER_NAMES = [
+  'Jones', 'Rashid', 'Kenner', 'Stafford', 'K Miller', 'Miller',
+  'Smith', 'Bellerose', 'Hunsaker', 'Wylie', 'Groesbeck', 'Bernstein',
+  'Belles', 'Leimer', 'Morrison', 'Lampe', 'Bronson', 'Barfuss',
+  'Simon', 'DenHann', 'Kirby', 'Rodriguez', 'Arndt', 'Siegrist',
+  'Nooren', 'Paice', 'Kroon', 'Brennan', 'Flanagan', 'Worgull',
+]
 const COLORS = ['#f97316', '#a855f7', '#ec4899', '#3b82f6', '#84cc16', '#14b8a6']
 
 // ---- Audio helpers ----
@@ -248,6 +254,7 @@ function makePellets() {
     y: Math.random() * MAP_SIZE,
     radius: 4 + Math.random() * 6,
     color: COLORS[Math.floor(Math.random() * COLORS.length)],
+    imgIdx: Math.floor(Math.random() * 2),
   }))
 }
 
@@ -287,6 +294,17 @@ export default function App() {
     const img = new Image()
     img.src = '/player1.jpeg'
     img.onload = () => { avatarImgRef.current = img }
+  }, [])
+
+  // Preload pellet face images
+  const pelletImgsRef = useRef([])
+  useEffect(() => {
+    const srcs = ['/adam.jpg', '/nathan.jpg']
+    srcs.forEach(src => {
+      const img = new Image()
+      img.src = src
+      img.onload = () => { pelletImgsRef.current.push(img) }
+    })
   }, [])
 
   // Music
@@ -444,6 +462,7 @@ export default function App() {
           y: Math.random() * MAP_SIZE,
           radius: 4 + Math.random() * 6,
           color: COLORS[Math.floor(Math.random() * COLORS.length)],
+          imgIdx: Math.floor(Math.random() * 2),
         })
       }
     }, 1000 / 30)
@@ -546,14 +565,28 @@ export default function App() {
       ctx.lineWidth = 6
       ctx.strokeRect(0, 0, MAP_SIZE, MAP_SIZE)
 
-      // Pellets — tropical fruit dots
+      // Pellets — adam & nathan faces
+      const pImgs = pelletImgsRef.current
       for (const pellet of state.pellets) {
         if (pellet.x < -camX - 20 || pellet.x > -camX + w + 20) continue
         if (pellet.y < -camY - 20 || pellet.y > -camY + h + 20) continue
+        const faceImg = pImgs.length > 0 ? pImgs[pellet.imgIdx % pImgs.length] : null
+        if (faceImg) {
+          ctx.save()
+          ctx.beginPath()
+          ctx.arc(pellet.x, pellet.y, pellet.radius, 0, Math.PI * 2)
+          ctx.clip()
+          const d = pellet.radius * 2
+          ctx.drawImage(faceImg, pellet.x - pellet.radius, pellet.y - pellet.radius, d, d)
+          ctx.restore()
+        } else {
+          ctx.beginPath()
+          ctx.arc(pellet.x, pellet.y, pellet.radius, 0, Math.PI * 2)
+          ctx.fillStyle = pellet.color
+          ctx.fill()
+        }
         ctx.beginPath()
         ctx.arc(pellet.x, pellet.y, pellet.radius, 0, Math.PI * 2)
-        ctx.fillStyle = pellet.color
-        ctx.fill()
         ctx.strokeStyle = 'rgba(255,255,255,0.5)'
         ctx.lineWidth = 1.5
         ctx.stroke()
