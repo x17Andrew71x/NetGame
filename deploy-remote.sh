@@ -2,7 +2,7 @@
 set -e
 
 SERVER="andrew@107.161.89.172"
-PASS='x58G1@$$@$$1n!'
+PASS='placeholder'
 IMAGE="simple-node-server"
 
 echo "==> Building image for linux/amd64..."
