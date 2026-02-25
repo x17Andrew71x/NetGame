@@ -911,7 +911,7 @@ export default function App() {
   return (
     <div style={{ position: 'relative' }}>
       <canvas ref={canvasRef} className="game-canvas" />
-      <button className="mute-btn mute-bottom-right" onClick={() => setMuted(m => !m)}>
+      <button className="mute-btn mute-bottom-left" onClick={() => setMuted(m => !m)}>
         {muted ? '🔇' : '🔊'}
       </button>
       {showHint && (

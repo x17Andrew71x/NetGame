@@ -95,108 +95,158 @@ const io = new Server(httpServer, {
 
 // ---- Socket Handlers ----
 io.on('connection', (socket) => {
-  console.log(`Connected: ${socket.id}`)
+  try {
+    console.log(`Connected: ${socket.id}`)
 
-  socket.on('login', ({ name }) => {
-    console.log(`Login: ${name} (${socket.id})`)
-    spawnPlayer(socket.id, name)
-    socket.emit('loggedIn', { id: socket.id })
-  })
+    socket.on('login', ({ name }) => {
+      try {
+        console.log(`Login: ${name} (${socket.id})`)
+        spawnPlayer(socket.id, name)
+        socket.emit('loggedIn', { id: socket.id })
+      } catch (err) {
+        console.error(`Error in login handler (${socket.id}):`, err.message)
+        socket.emit('error', { message: 'Login failed' })
+      }
+    })
 
-  socket.on('playerMove', ({ x, y }) => {
-    const player = players[socket.id]
-    if (!player || !player.alive) return
-    // Normalize direction
-    const len = Math.hypot(x, y)
-    if (len > 0) {
-      player.dx = x / len
-      player.dy = y / len
-    } else {
-      player.dx = 0
-      player.dy = 0
-    }
-  })
+    socket.on('playerMove', ({ x, y }) => {
+      try {
+        const player = players[socket.id]
+        if (!player || !player.alive) return
+        // Normalize direction
+        const len = Math.hypot(x, y)
+        if (len > 0) {
+          player.dx = x / len
+          player.dy = y / len
+        } else {
+          player.dx = 0
+          player.dy = 0
+        }
+      } catch (err) {
+        console.error(`Error in playerMove handler (${socket.id}):`, err.message)
+      }
+    })
 
-  socket.on('restart', () => {
-    const old = players[socket.id]
-    const name = old ? old.name : 'Player'
-    spawnPlayer(socket.id, name)
-    socket.emit('loggedIn', { id: socket.id })
-  })
+    socket.on('restart', () => {
+      try {
+        const old = players[socket.id]
+        const name = old ? old.name : 'Player'
+        spawnPlayer(socket.id, name)
+        socket.emit('loggedIn', { id: socket.id })
+      } catch (err) {
+        console.error(`Error in restart handler (${socket.id}):`, err.message)
+        socket.emit('error', { message: 'Restart failed' })
+      }
+    })
 
-  socket.on('disconnect', () => {
-    console.log(`Disconnected: ${socket.id}`)
-    delete players[socket.id]
-  })
+    socket.on('disconnect', () => {
+      try {
+        console.log(`Disconnected: ${socket.id}`)
+        delete players[socket.id]
+      } catch (err) {
+        console.error(`Error in disconnect handler (${socket.id}):`, err.message)
+      }
+    })
+  } catch (err) {
+    console.error(`Error setting up connection (${socket.id}):`, err.message)
+  }
 })
 
 // ---- Game Loop ----
 fillPellets()
 
 setInterval(() => {
-  const alivePlayers = Object.values(players).filter(p => p.alive)
+  try {
+    const alivePlayers = Object.values(players).filter(p => p.alive)
 
-  // Move players
-  for (const p of alivePlayers) {
-    let speed
-    if (p.score <= 250) speed = BASE_SPEED
-    else if (p.score <= 1000) speed = 7
-    else speed = 3.5
-    p.x += p.dx * speed
-    p.y += p.dy * speed
-    p.x = Math.max(p.radius, Math.min(MAP_SIZE - p.radius, p.x))
-    p.y = Math.max(p.radius, Math.min(MAP_SIZE - p.radius, p.y))
-  }
+    // Move players
+    for (const p of alivePlayers) {
+      let speed
+      if (p.score <= 250) speed = BASE_SPEED
+      else if (p.score <= 1000) speed = 7
+      else speed = 3.5
+      p.x += p.dx * speed
+      p.y += p.dy * speed
+      p.x = Math.max(p.radius, Math.min(MAP_SIZE - p.radius, p.x))
+      p.y = Math.max(p.radius, Math.min(MAP_SIZE - p.radius, p.y))
+    }
 
-  // Pellet collisions
-  for (const p of alivePlayers) {
-    pellets = pellets.filter(pellet => {
-      const dist = Math.hypot(p.x - pellet.x, p.y - pellet.y)
-      if (dist < p.radius + pellet.radius) {
-        p.score += 4
-        p.radius = radiusFromScore(p.score)
-        return false
-      }
-      return true
-    })
-  }
+    // Pellet collisions
+    for (const p of alivePlayers) {
+      pellets = pellets.filter(pellet => {
+        const dist = Math.hypot(p.x - pellet.x, p.y - pellet.y)
+        if (dist < p.radius + pellet.radius) {
+          p.score += 4
+          p.radius = radiusFromScore(p.score)
+          return false
+        }
+        return true
+      })
+    }
 
-  // Player vs player collisions
-  for (let i = 0; i < alivePlayers.length; i++) {
-    for (let j = i + 1; j < alivePlayers.length; j++) {
-      const a = alivePlayers[i]
-      const b = alivePlayers[j]
-      if (!a.alive || !b.alive) continue
-      const dist = Math.hypot(a.x - b.x, a.y - b.y)
-      const [bigger, smaller] = a.score >= b.score ? [a, b] : [b, a]
-      // Bigger must overlap smaller's center and be significantly larger
-      if (dist < bigger.radius && bigger.score > smaller.score * EAT_THRESHOLD) {
-        bigger.score += Math.floor(smaller.score / 2)
-        bigger.radius = radiusFromScore(bigger.score)
-        smaller.alive = false
-        io.to(smaller.id).emit('playerDied', { killedBy: bigger.name })
+    // Player vs player collisions
+    for (let i = 0; i < alivePlayers.length; i++) {
+      for (let j = i + 1; j < alivePlayers.length; j++) {
+        const a = alivePlayers[i]
+        const b = alivePlayers[j]
+        if (!a.alive || !b.alive) continue
+        const dist = Math.hypot(a.x - b.x, a.y - b.y)
+        const [bigger, smaller] = a.score >= b.score ? [a, b] : [b, a]
+        // Bigger must overlap smaller's center and be significantly larger
+        if (dist < bigger.radius && bigger.score > smaller.score * EAT_THRESHOLD) {
+          bigger.score += Math.floor(smaller.score / 2)
+          bigger.radius = radiusFromScore(bigger.score)
+          smaller.alive = false
+          io.to(smaller.id).emit('playerDied', { killedBy: bigger.name })
+        }
       }
     }
-  }
 
-  // Respawn pellets
-  fillPellets()
+    // Respawn pellets
+    fillPellets()
 
-  // Broadcast state
-  const state = {
-    players: Object.values(players).filter(p => p.alive).map(p => ({
-      id: p.id, name: p.name, x: p.x, y: p.y,
-      score: p.score, radius: p.radius, color: p.color
-    })),
-    pellets: pellets.map(p => ({
-      id: p.id, x: p.x, y: p.y, color: p.color, radius: p.radius
-    }))
+    // Broadcast state
+    const state = {
+      players: Object.values(players).filter(p => p.alive).map(p => ({
+        id: p.id, name: p.name, x: p.x, y: p.y,
+        score: p.score, radius: p.radius, color: p.color
+      })),
+      pellets: pellets.map(p => ({
+        id: p.id, x: p.x, y: p.y, color: p.color, radius: p.radius
+      }))
+    }
+    io.emit('gameState', state)
+  } catch (err) {
+    console.error('Error in game loop tick:', err.message)
+    console.error(err.stack)
   }
-  io.emit('gameState', state)
 }, TICK_RATE)
+
+// ---- Error Handlers ----
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT EXCEPTION:', err.message)
+  console.error(err.stack)
+  // Server stays running
+})
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('UNHANDLED REJECTION:', reason)
+  // Server stays running
+})
+
+io.on('error', (err) => {
+  console.error('Socket.IO error:', err.message)
+})
 
 // ---- Start ----
 const PORT = process.env.PORT || 3000
 httpServer.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`)
+})
+
+httpServer.on('error', (err) => {
+  console.error('HTTP Server error:', err.message)
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${PORT} is already in use`)
+  }
 })

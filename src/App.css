@@ -321,9 +321,10 @@ body {
   box-shadow: none;
 }
 
-.mute-bottom-right {
+.mute-bottom-left {
   top: auto !important;
-  right: 14px !important;
+  left: 14px !important;
+  right: auto !important;
   bottom: 14px !important;
 }
 
