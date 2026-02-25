@@ -5,16 +5,112 @@
 }
 
 body {
-  background: #1a1a2e;
+  background: #111;
   color: #eee;
   font-family: 'Courier New', monospace;
   min-height: 100vh;
-  display: flex;
-  justify-content: center;
-  align-items: center;
+  overflow: hidden;
 }
 
-.app {
+/* Login Screen */
+.login-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  gap: 1.2rem;
+}
+
+.game-title {
+  font-size: 5rem;
+  color: #0f8;
+  text-shadow: 0 0 20px #0f8, 0 0 60px rgba(0, 255, 136, 0.3);
+  letter-spacing: 0.15em;
+}
+
+.game-subtitle {
+  font-size: 1.2rem;
+  color: #888;
+  margin-bottom: 1rem;
+}
+
+.name-select {
+  font-size: 1.3rem;
+  padding: 0.6rem 1.5rem;
+  border-radius: 8px;
+  border: 2px solid #333;
+  background: #1a1a1a;
+  color: #eee;
+  font-family: 'Courier New', monospace;
+  cursor: pointer;
+  min-width: 220px;
   text-align: center;
-  padding: 2rem;
+}
+
+.name-select:focus {
+  outline: none;
+  border-color: #0f8;
+}
+
+.play-btn {
+  font-size: 1.5rem;
+  padding: 0.75rem 3rem;
+  border-radius: 8px;
+  border: none;
+  background: #0f8;
+  color: #111;
+  font-family: 'Courier New', monospace;
+  font-weight: bold;
+  cursor: pointer;
+  letter-spacing: 0.1em;
+  transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.play-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 20px rgba(0, 255, 136, 0.4);
+}
+
+.play-btn:active {
+  transform: scale(0.97);
+}
+
+/* Game Canvas */
+.game-canvas {
+  display: block;
+  cursor: crosshair;
+  width: 100vw;
+  height: 100vh;
+}
+
+/* Dead Screen */
+.dead-screen {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  gap: 1rem;
+}
+
+.dead-title {
+  font-size: 4rem;
+  color: #f44;
+  text-shadow: 0 0 20px #f44, 0 0 60px rgba(255, 68, 68, 0.3);
+}
+
+.dead-info {
+  font-size: 1.3rem;
+  color: #ccc;
+}
+
+.killer-name {
+  color: #f97316;
+  font-weight: bold;
+}
+
+.dead-score {
+  font-size: 1.1rem;
+  color: #888;
 }
