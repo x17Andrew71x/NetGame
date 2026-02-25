@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { io } from 'socket.io-client'
 
 // ---- Toggle this to test frontend without a server ----
-const MOCK_MODE = true
+const MOCK_MODE = false
 // -------------------------------------------------------
 
 const API_URL = 'https://api.netgain.techfullymade.com'
