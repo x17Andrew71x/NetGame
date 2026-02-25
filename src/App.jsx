@@ -283,6 +283,45 @@ export default function App() {
   const musicLoopRef = useRef(null)
   const [muted, setMuted] = useState(false)
   const mutedRef = useRef(false)
+  const [deathLeaderboard, setDeathLeaderboard] = useState([])
+  const [serverOnline, setServerOnline] = useState(true)
+  const disconnectTimer = useRef(null)
+
+  // Ping server every 3s on login screen to check if online
+  useEffect(() => {
+    if (screen !== 'login') return
+    let active = true
+    function ping() {
+      fetch(API_URL + '/socket.io/?EIO=4&transport=polling', { mode: 'cors' })
+        .then(r => { if (active) setServerOnline(r.ok) })
+        .catch(() => { if (active) setServerOnline(false) })
+    }
+    ping()
+    const id = setInterval(ping, 3000)
+    return () => { active = false; clearInterval(id) }
+  }, [screen])
+
+  // Kick back to login if disconnected for 3+ seconds during game
+  useEffect(() => {
+    if (MOCK_MODE) return
+    socket.on('disconnect', () => {
+      disconnectTimer.current = setTimeout(() => {
+        setScreen('login')
+        socket.disconnect()
+      }, 3000)
+    })
+    socket.on('connect', () => {
+      if (disconnectTimer.current) {
+        clearTimeout(disconnectTimer.current)
+        disconnectTimer.current = null
+      }
+    })
+    return () => {
+      socket.off('disconnect')
+      socket.off('connect')
+      if (disconnectTimer.current) clearTimeout(disconnectTimer.current)
+    }
+  }, [])
 
   function getAudio() {
     if (!audioCtxRef.current) {
@@ -344,6 +383,9 @@ export default function App() {
     })
 
     socket.on('playerDied', ({ killedBy }) => {
+      const state = gameStateRef.current
+      const sorted = [...state.players].sort((a, b) => b.score - a.score)
+      setDeathLeaderboard(sorted.map(p => ({ name: p.name, score: p.score, id: p.id })))
       setKilledBy(killedBy)
       setScreen('dead')
     })
@@ -576,25 +618,27 @@ export default function App() {
       // Pellets — adam & nathan faces
       const pImgs = pelletImgsRef.current
       for (const pellet of state.pellets) {
-        if (pellet.x < -camX - 20 || pellet.x > -camX + w + 20) continue
-        if (pellet.y < -camY - 20 || pellet.y > -camY + h + 20) continue
-        const faceImg = pImgs.length > 0 ? pImgs[pellet.imgIdx % pImgs.length] : null
+        const pr = pellet.radius * 3
+        if (pellet.x < -camX - pr || pellet.x > -camX + w + pr) continue
+        if (pellet.y < -camY - pr || pellet.y > -camY + h + pr) continue
+        const idx = pellet.imgIdx != null ? pellet.imgIdx : (pellet.id % 2)
+        const faceImg = pImgs.length > 0 ? pImgs[idx % pImgs.length] : null
         if (faceImg) {
           ctx.save()
           ctx.beginPath()
-          ctx.arc(pellet.x, pellet.y, pellet.radius, 0, Math.PI * 2)
+          ctx.arc(pellet.x, pellet.y, pr, 0, Math.PI * 2)
           ctx.clip()
-          const d = pellet.radius * 2
-          ctx.drawImage(faceImg, pellet.x - pellet.radius, pellet.y - pellet.radius, d, d)
+          const d = pr * 2
+          ctx.drawImage(faceImg, pellet.x - pr, pellet.y - pr, d, d)
           ctx.restore()
         } else {
           ctx.beginPath()
-          ctx.arc(pellet.x, pellet.y, pellet.radius, 0, Math.PI * 2)
+          ctx.arc(pellet.x, pellet.y, pr, 0, Math.PI * 2)
           ctx.fillStyle = pellet.color
           ctx.fill()
         }
         ctx.beginPath()
-        ctx.arc(pellet.x, pellet.y, pellet.radius, 0, Math.PI * 2)
+        ctx.arc(pellet.x, pellet.y, pr, 0, Math.PI * 2)
         ctx.strokeStyle = 'rgba(255,255,255,0.5)'
         ctx.lineWidth = 1.5
         ctx.stroke()
@@ -672,6 +716,40 @@ export default function App() {
       ctx.fill()
       ctx.fillStyle = '#0369a1'
       ctx.fillText(scoreText, 26, 21)
+
+      // Top 3 leaderboard (top-right)
+      const sorted = [...state.players].sort((a, b) => b.score - a.score).slice(0, 3)
+      const lbX = w - 14, lbY = 14
+      ctx.textAlign = 'right'
+      ctx.textBaseline = 'top'
+      ctx.font = 'bold 15px Quicksand, sans-serif'
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'
+      ctx.beginPath()
+      ctx.roundRect(lbX - 170, lbY, 170, 18 + sorted.length * 22, 12)
+      ctx.fill()
+      ctx.fillStyle = '#0369a1'
+      ctx.font = 'bold 14px Quicksand, sans-serif'
+      ctx.fillText('Leaderboard', lbX - 10, lbY + 4)
+      sorted.forEach((p, i) => {
+        const medal = i === 0 ? '1.' : i === 1 ? '2.' : '3.'
+        const isMe = p.id === myIdRef.current
+        ctx.font = isMe ? 'bold 13px Quicksand, sans-serif' : '13px Quicksand, sans-serif'
+        ctx.fillStyle = isMe ? '#f59e0b' : '#0369a1'
+        ctx.fillText(`${medal} ${p.name}  ${p.score}`, lbX - 10, lbY + 20 + i * 22)
+      })
+
+      // Online players count (top-left, below score)
+      ctx.textAlign = 'left'
+      ctx.textBaseline = 'top'
+      const onlineText = `Online: ${state.players.length}`
+      const ow = ctx.measureText(onlineText).width
+      ctx.fillStyle = 'rgba(255,255,255,0.85)'
+      ctx.beginPath()
+      ctx.roundRect(12, 56, ow + 28, 32, 16)
+      ctx.fill()
+      ctx.font = 'bold 15px Quicksand, sans-serif'
+      ctx.fillStyle = '#0369a1'
+      ctx.fillText(onlineText, 26, 64)
 
       // Mock mode badge
       if (MOCK_MODE) {
@@ -760,23 +838,17 @@ export default function App() {
         <h1 className="game-title">NetGame</h1>
         <p className="game-subtitle">Eat or be eaten</p>
         {MOCK_MODE && <p className="mock-badge">⚠ Mock Mode — no server needed</p>}
-        <div className="player-grid">
-          {PLAYER_NAMES.map((name, i) => (
-            <div
-              key={name}
-              className={`player-card ${playerName === name ? 'selected' : ''}`}
-              onClick={() => setPlayerName(name)}
-            >
-              {name === 'Player 1' ? (
-                <img src="/player1.jpeg" alt={name} className="card-avatar-img" />
-              ) : (
-                <div className="card-creature">{SEA_CREATURES[(i - 1) % SEA_CREATURES.length]}</div>
-              )}
-              <span className="card-label">{name}</span>
-            </div>
+        <select
+          className="name-select"
+          value={playerName}
+          onChange={e => setPlayerName(e.target.value)}
+        >
+          {PLAYER_NAMES.map(name => (
+            <option key={name} value={name}>{name}</option>
           ))}
-        </div>
-        <button className="play-btn" onClick={handlePlay}>Play</button>
+        </select>
+        <button className="play-btn" onClick={handlePlay} disabled={!serverOnline && !MOCK_MODE}>Play</button>
+        {!serverOnline && !MOCK_MODE && <div className="server-offline-banner">Server Offline</div>}
       </div>
     )
   }
@@ -787,6 +859,33 @@ export default function App() {
         <h1 className="dead-title">GAME OVER</h1>
         <p className="dead-info">Eaten by <span className="killer-name">{killedBy}</span></p>
         <p className="dead-score">Final score: {myScore}</p>
+        {deathLeaderboard.length > 0 && (() => {
+          const top10 = deathLeaderboard.slice(0, 10)
+          const myRank = deathLeaderboard.findIndex(p => p.id === myIdRef.current)
+          const inTop10 = myRank >= 0 && myRank < 10
+          return (
+            <div className="death-leaderboard">
+              <h2 className="lb-title">Leaderboard</h2>
+              {top10.map((p, i) => (
+                <div key={p.id} className={`lb-row ${p.id === myIdRef.current ? 'lb-me' : ''}`}>
+                  <span className="lb-rank">#{i + 1}</span>
+                  <span className="lb-name">{p.name}</span>
+                  <span className="lb-score">{p.score}</span>
+                </div>
+              ))}
+              {!inTop10 && myRank >= 0 && (
+                <>
+                  <div className="lb-divider">...</div>
+                  <div className="lb-row lb-me">
+                    <span className="lb-rank">#{myRank + 1}</span>
+                    <span className="lb-name">{deathLeaderboard[myRank].name}</span>
+                    <span className="lb-score">{deathLeaderboard[myRank].score}</span>
+                  </div>
+                </>
+              )}
+            </div>
+          )
+        })()}
         <button className="play-btn" onClick={handleRestart}>Play Again</button>
       </div>
     )

@@ -11,7 +11,7 @@ const MAP_SIZE = 4000
 const TICK_RATE = 1000 / 30
 const MAX_PELLETS = 500
 const PELLET_RADIUS = 5
-const BASE_SPEED = 5
+const BASE_SPEED = 10
 const START_SCORE = 10
 const EAT_THRESHOLD = 1.1
 const PLAYER_COLORS = [
@@ -138,7 +138,10 @@ setInterval(() => {
 
   // Move players
   for (const p of alivePlayers) {
-    const speed = BASE_SPEED / Math.sqrt(p.score / START_SCORE)
+    let speed
+    if (p.score <= 250) speed = BASE_SPEED
+    else if (p.score <= 1000) speed = 7
+    else speed = 3.5
     p.x += p.dx * speed
     p.y += p.dy * speed
     p.x = Math.max(p.radius, Math.min(MAP_SIZE - p.radius, p.x))
@@ -150,7 +153,7 @@ setInterval(() => {
     pellets = pellets.filter(pellet => {
       const dist = Math.hypot(p.x - pellet.x, p.y - pellet.y)
       if (dist < p.radius + pellet.radius) {
-        p.score += 1
+        p.score += 4
         p.radius = radiusFromScore(p.score)
         return false
       }
