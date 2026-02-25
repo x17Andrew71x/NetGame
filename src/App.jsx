@@ -12,6 +12,14 @@ const socket = io(SERVER_URL, { autoConnect: false })
 const MAP_SIZE = 4000
 const PLAYER_NAMES = ['Player 1', 'Player 2', 'Player 3', 'Player 4', 'Player 5', 'Player 6']
 const COLORS = ['#f97316', '#a855f7', '#ec4899', '#3b82f6', '#84cc16', '#14b8a6']
+const SEA_CREATURES = ['🐠', '🦈', '🐙', '🦑', '🐡', '🦞', '🦀', '🐬', '🦭', '🦐', '🐟', '🐋']
+const creatureMap = {} // player id -> creature, assigned on first sight
+function getCreature(id) {
+  if (!creatureMap[id]) {
+    creatureMap[id] = SEA_CREATURES[Object.keys(creatureMap).length % SEA_CREATURES.length]
+  }
+  return creatureMap[id]
+}
 
 // ---- Audio helpers ----
 function playNote(ctx, freq, duration, vol = 0.15, type = 'triangle') {
@@ -596,8 +604,15 @@ export default function App() {
         ctx.lineWidth = 3
         ctx.stroke()
 
-        // Shine spot (skip on photo blobs so the face shows clearly)
         if (!usePhoto) {
+          // Sea creature emoji
+          const emojiSize = Math.max(12, player.radius * 1.1)
+          ctx.font = `${emojiSize}px serif`
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText(getCreature(player.id), player.x, player.y)
+
+          // Shine spot
           ctx.beginPath()
           ctx.arc(
             player.x - player.radius * 0.28,
@@ -712,20 +727,22 @@ export default function App() {
         <h1 className="game-title">NetGame</h1>
         <p className="game-subtitle">Eat or be eaten</p>
         {MOCK_MODE && <p className="mock-badge">⚠ Mock Mode — no server needed</p>}
-        <img
-          src={playerName === 'Player 1' ? '/player1.jpeg' : `https://placehold.co/120x120/0ea5e9/ffffff?text=P${PLAYER_NAMES.indexOf(playerName) + 1}`}
-          alt={playerName}
-          className="player-avatar"
-        />
-        <select
-          className="name-select"
-          value={playerName}
-          onChange={e => setPlayerName(e.target.value)}
-        >
-          {PLAYER_NAMES.map(name => (
-            <option key={name} value={name}>{name}</option>
+        <div className="player-grid">
+          {PLAYER_NAMES.map((name, i) => (
+            <div
+              key={name}
+              className={`player-card ${playerName === name ? 'selected' : ''}`}
+              onClick={() => setPlayerName(name)}
+            >
+              {name === 'Player 1' ? (
+                <img src="/player1.jpeg" alt={name} className="card-avatar-img" />
+              ) : (
+                <div className="card-creature">{SEA_CREATURES[(i - 1) % SEA_CREATURES.length]}</div>
+              )}
+              <span className="card-label">{name}</span>
+            </div>
           ))}
-        </select>
+        </div>
         <button className="play-btn" onClick={handlePlay}>Play</button>
       </div>
     )
