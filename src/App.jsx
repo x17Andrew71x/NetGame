@@ -13,6 +13,234 @@ const MAP_SIZE = 4000
 const PLAYER_NAMES = ['Player 1', 'Player 2', 'Player 3', 'Player 4', 'Player 5', 'Player 6']
 const COLORS = ['#f97316', '#a855f7', '#ec4899', '#3b82f6', '#84cc16', '#14b8a6']
 
+// ---- Audio helpers ----
+function playNote(ctx, freq, duration, vol = 0.15, type = 'triangle') {
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.type = type
+  osc.frequency.value = freq
+  gain.gain.setValueAtTime(0, ctx.currentTime)
+  gain.gain.linearRampToValueAtTime(vol, ctx.currentTime + 0.01)
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration)
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.start()
+  osc.stop(ctx.currentTime + duration)
+}
+
+function playPelletSound(ctx) {
+  // Quick bright pop
+  playNote(ctx, 700 + Math.random() * 400, 0.12, 0.4, 'sine')
+}
+
+function playEatPlayerSound(ctx) {
+  // Satisfying descending gulp
+  const osc = ctx.createOscillator()
+  const gain = ctx.createGain()
+  osc.type = 'sawtooth'
+  osc.frequency.setValueAtTime(280, ctx.currentTime)
+  osc.frequency.exponentialRampToValueAtTime(55, ctx.currentTime + 0.45)
+  gain.gain.setValueAtTime(0.75, ctx.currentTime)
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45)
+  osc.connect(gain)
+  gain.connect(ctx.destination)
+  osc.start()
+  osc.stop(ctx.currentTime + 0.45)
+  // Extra punch layer
+  playNote(ctx, 160, 0.2, 0.55, 'square')
+}
+
+// Tropical steel-drum melody: pentatonic C major C D E G A
+const PENTA = [261.63, 293.66, 329.63, 392.00, 440.00, 523.25, 587.33, 659.25]
+const MELODY = [4,2,5,3,4,6,5,4, 2,3,4,2,1,3,2,0]
+const BASS   = [0,0,1,1, 0,0,2,1] // indices into [C2,G2,F2]
+const BASS_NOTES = [65.41, 98.00, 87.31]
+
+function playWave(ctx) {
+  const duration = 3.5 + Math.random() * 2
+  const bufLen = Math.floor(ctx.sampleRate * duration)
+  const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate)
+  const data = buf.getChannelData(0)
+  for (let i = 0; i < bufLen; i++) data[i] = Math.random() * 2 - 1
+
+  const src = ctx.createBufferSource()
+  src.buffer = buf
+
+  // Low-pass to get that whooshy ocean rumble
+  const lp = ctx.createBiquadFilter()
+  lp.type = 'lowpass'
+  lp.frequency.value = 420
+  lp.frequency.linearRampToValueAtTime(180, ctx.currentTime + duration)
+
+  const gain = ctx.createGain()
+  // Swell in, hold, fade out
+  gain.gain.setValueAtTime(0, ctx.currentTime)
+  gain.gain.linearRampToValueAtTime(0.55, ctx.currentTime + duration * 0.35)
+  gain.gain.setValueAtTime(0.55, ctx.currentTime + duration * 0.6)
+  gain.gain.linearRampToValueAtTime(0, ctx.currentTime + duration)
+
+  src.connect(lp)
+  lp.connect(gain)
+  gain.connect(ctx.destination)
+  src.start()
+  src.stop(ctx.currentTime + duration)
+}
+
+function playDolphin(ctx) {
+  // Dolphins: rapid bursts of high-pitched chirps and clicks
+  const numClicks = 3 + Math.floor(Math.random() * 5)
+  let offset = 0
+  for (let i = 0; i < numClicks; i++) {
+    const isChirp = Math.random() > 0.4
+    if (isChirp) {
+      // Chirp: fast upward or downward sweep
+      const osc = ctx.createOscillator()
+      const gain = ctx.createGain()
+      const goUp = Math.random() > 0.5
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(goUp ? 1800 + Math.random() * 600 : 3200 + Math.random() * 800, ctx.currentTime + offset)
+      osc.frequency.exponentialRampToValueAtTime(goUp ? 3400 + Math.random() * 800 : 1600 + Math.random() * 400, ctx.currentTime + offset + 0.12)
+      gain.gain.setValueAtTime(0, ctx.currentTime + offset)
+      gain.gain.linearRampToValueAtTime(0.22, ctx.currentTime + offset + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + offset + 0.12)
+      osc.connect(gain)
+      gain.connect(ctx.destination)
+      osc.start(ctx.currentTime + offset)
+      osc.stop(ctx.currentTime + offset + 0.13)
+      offset += 0.1 + Math.random() * 0.15
+    } else {
+      // Click: very short noise burst
+      const bufLen = Math.floor(ctx.sampleRate * 0.015)
+      const buf = ctx.createBuffer(1, bufLen, ctx.sampleRate)
+      const data = buf.getChannelData(0)
+      for (let j = 0; j < bufLen; j++) data[j] = (Math.random() * 2 - 1) * (1 - j / bufLen)
+      const src = ctx.createBufferSource()
+      src.buffer = buf
+      const hp = ctx.createBiquadFilter()
+      hp.type = 'highpass'
+      hp.frequency.value = 2000
+      const gain = ctx.createGain()
+      gain.gain.value = 0.28
+      src.connect(hp)
+      hp.connect(gain)
+      gain.connect(ctx.destination)
+      src.start(ctx.currentTime + offset)
+      offset += 0.04 + Math.random() * 0.06
+    }
+  }
+}
+
+function playWhale(ctx) {
+  // Whales sing long sweeping glides — randomise each call slightly
+  const calls = [
+    { start: 180, end: 80,  dur: 2.2 },
+    { start: 90,  end: 160, dur: 1.8 },
+    { start: 120, end: 60,  dur: 2.8 },
+    { start: 70,  end: 140, dur: 2.0 },
+  ]
+  const sequence = Array.from({ length: 2 + Math.floor(Math.random() * 3) }, () =>
+    calls[Math.floor(Math.random() * calls.length)]
+  )
+
+  let offset = 0
+  for (const call of sequence) {
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    // Slight vibrato
+    const lfo = ctx.createOscillator()
+    const lfoGain = ctx.createGain()
+    lfo.frequency.value = 3 + Math.random() * 2
+    lfoGain.gain.value = 4
+    lfo.connect(lfoGain)
+    lfoGain.connect(osc.frequency)
+
+    osc.type = 'sine'
+    osc.frequency.setValueAtTime(call.start, ctx.currentTime + offset)
+    osc.frequency.exponentialRampToValueAtTime(call.end, ctx.currentTime + offset + call.dur)
+
+    gain.gain.setValueAtTime(0, ctx.currentTime + offset)
+    gain.gain.linearRampToValueAtTime(0.25, ctx.currentTime + offset + call.dur * 0.2)
+    gain.gain.setValueAtTime(0.25, ctx.currentTime + offset + call.dur * 0.75)
+    gain.gain.linearRampToValueAtTime(0, ctx.currentTime + offset + call.dur)
+
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    lfo.start(ctx.currentTime + offset)
+    osc.start(ctx.currentTime + offset)
+    lfo.stop(ctx.currentTime + offset + call.dur)
+    osc.stop(ctx.currentTime + offset + call.dur)
+
+    offset += call.dur + 0.3 + Math.random() * 0.5
+  }
+}
+
+function startOceanSounds(ctx, mutedRef) {
+  const timeouts = []
+
+  function scheduleWave() {
+    const t = setTimeout(() => {
+      if (!mutedRef.current) playWave(ctx)
+      timeouts.push(scheduleWave())
+    }, 4000 + Math.random() * 5000)
+    return t
+  }
+
+  function scheduleWhale() {
+    const t = setTimeout(() => {
+      if (!mutedRef.current) playWhale(ctx)
+      timeouts.push(scheduleWhale())
+    }, 3000 + Math.random() * 5000) // every 3–8s
+    return t
+  }
+
+  function scheduleDolphin() {
+    const t = setTimeout(() => {
+      if (!mutedRef.current) playDolphin(ctx)
+      timeouts.push(scheduleDolphin())
+    }, 2000 + Math.random() * 4000) // every 2–6s
+    return t
+  }
+
+  timeouts.push(scheduleWave())
+  // Three whales staggered at start so it's immediately lively
+  if (!mutedRef.current) playWhale(ctx)
+  timeouts.push(setTimeout(() => { if (!mutedRef.current) playWhale(ctx) }, 2000))
+  timeouts.push(setTimeout(() => { if (!mutedRef.current) playWhale(ctx) }, 4500))
+  timeouts.push(scheduleWhale())
+  // Dolphins start after a moment
+  timeouts.push(setTimeout(() => { if (!mutedRef.current) playDolphin(ctx) }, 1000))
+  timeouts.push(scheduleDolphin())
+
+  return () => timeouts.forEach(clearTimeout)
+}
+
+function startMusic(ctx, mutedRef) {
+  let beat = 0
+  const bps = 0.28 // seconds per beat (~214 BPM, upbeat tropical)
+  const id = setInterval(() => {
+    if (mutedRef.current) { beat++; return }
+    // Melody
+    playNote(ctx, PENTA[MELODY[beat % MELODY.length]], bps * 0.85, 0.04, 'triangle')
+    // Bass every 2 beats
+    if (beat % 2 === 0) {
+      playNote(ctx, BASS_NOTES[BASS[Math.floor(beat / 2) % BASS.length]], bps * 1.8, 0.06, 'sine')
+    }
+    // Hi-hat every beat
+    const hh = ctx.createBufferSource()
+    const buf = ctx.createBuffer(1, ctx.sampleRate * 0.04, ctx.sampleRate)
+    const data = buf.getChannelData(0)
+    for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length)
+    hh.buffer = buf
+    const hhGain = ctx.createGain()
+    hhGain.gain.value = 0.015
+    hh.connect(hhGain)
+    hhGain.connect(ctx.destination)
+    hh.start()
+    beat++
+  }, bps * 1000)
+  return id
+}
+
 function makePellets() {
   return Array.from({ length: 300 }, (_, i) => ({
     id: i,
@@ -36,6 +264,20 @@ export default function App() {
   const mouseDirRef = useRef({ x: 0, y: 0 })
   const playerNameRef = useRef(playerName)
   const avatarImgRef = useRef(null)
+  const audioCtxRef = useRef(null)
+  const musicLoopRef = useRef(null)
+  const [muted, setMuted] = useState(false)
+  const mutedRef = useRef(false)
+
+  function getAudio() {
+    if (!audioCtxRef.current) {
+      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)()
+    }
+    if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume()
+    return audioCtxRef.current
+  }
+
+  useEffect(() => { mutedRef.current = muted }, [muted])
 
   // Keep playerNameRef in sync
   useEffect(() => { playerNameRef.current = playerName }, [playerName])
@@ -46,6 +288,19 @@ export default function App() {
     img.src = '/player1.jpeg'
     img.onload = () => { avatarImgRef.current = img }
   }, [])
+
+  // Music
+  useEffect(() => {
+    if (screen !== 'game') {
+      clearInterval(musicLoopRef.current)
+      return
+    }
+    const ctx = getAudio()
+    const id = startMusic(ctx, mutedRef)
+    musicLoopRef.current = id
+    const stopOcean = startOceanSounds(ctx, mutedRef)
+    return () => { clearInterval(id); stopOcean() }
+  }, [screen])
 
   // Socket listeners (real mode only)
   useEffect(() => {
@@ -143,6 +398,7 @@ export default function App() {
             if (eater.id === 'mock-player') {
               eater.score += Math.floor(prey.radius * 3)
               setMyScore(eater.score)
+              if (!mutedRef.current) playEatPlayerSound(getAudio())
             }
             if (prey.id === 'mock-player') {
               // Player got eaten — go to dead screen
@@ -161,6 +417,7 @@ export default function App() {
       }
 
       // Eat pellets
+      let ateAPellet = false
       state.pellets = state.pellets.filter(pellet => {
         for (const p of state.players) {
           const dx = p.x - pellet.x
@@ -170,12 +427,14 @@ export default function App() {
             if (p.id === 'mock-player') {
               p.score += 1
               setMyScore(p.score)
+              ateAPellet = true
             }
             return false
           }
         }
         return true
       })
+      if (ateAPellet && !mutedRef.current) playPelletSound(getAudio())
 
       // Respawn pellets
       while (state.pellets.length < 300) {
@@ -194,6 +453,7 @@ export default function App() {
 
   // Handle play
   const handlePlay = useCallback(() => {
+    getAudio() // warm up AudioContext on user gesture
     if (MOCK_MODE) {
       setMyScore(0)
       setScreen('game')
@@ -317,7 +577,7 @@ export default function App() {
         }
 
         // Blob
-        const usePhoto = isMe && playerNameRef.current === 'Player 1' && avatarImgRef.current
+        const usePhoto = player.name === 'Player 1' && avatarImgRef.current
         ctx.save()
         ctx.beginPath()
         ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2)
@@ -482,5 +742,12 @@ export default function App() {
     )
   }
 
-  return <canvas ref={canvasRef} className="game-canvas" />
+  return (
+    <div style={{ position: 'relative' }}>
+      <canvas ref={canvasRef} className="game-canvas" />
+      <button className="mute-btn" onClick={() => setMuted(m => !m)}>
+        {muted ? '🔇' : '🔊'}
+      </button>
+    </div>
+  )
 }
