@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>API Test</title>
+  </head>
+  <body>
+    <h1>Server Response:</h1>
+    <pre id="output">Connecting...</pre>
+
+    <script>
+      fetch("https://api.netgain.techfullymade.com")
+        .then((r) => r.text())
+        .then((t) => (document.getElementById("output").textContent = t))
+        .catch(
+          (e) => (document.getElementById("output").textContent = "Error: " + e)
+        );
+    </script>
+  </body>
+</html>

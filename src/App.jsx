@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { io } from 'socket.io-client'
 
-const SERVER_URL = import.meta.env.DEV ? 'http://localhost:3000' : window.location.origin
+const API_URL = 'https://api.netgain.techfullymade.com'
+const SERVER_URL = import.meta.env.DEV ? 'http://localhost:3000' : API_URL
 const socket = io(SERVER_URL, { autoConnect: false })
 
 const MAP_SIZE = 4000
