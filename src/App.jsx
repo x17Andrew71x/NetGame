@@ -12,10 +12,27 @@ const socket = io(SERVER_URL, { autoConnect: false })
 // Game picker catalog — add `ready: true` + handler when wiring a new game
 const GAME_CATALOG = [
   { id: 'netgame', title: 'NetGame', blurb: 'Eat or be eaten', icon: '🌊', ready: true },
-  { id: 'soon-racer', title: 'Neon Drift', blurb: 'Coming soon', icon: '🏎️', ready: false },
-  { id: 'soon-puzzle', title: 'Tile Vault', blurb: 'Coming soon', icon: '🧩', ready: false },
-  { id: 'soon-party', title: 'Barn Brawl', blurb: 'Coming soon', icon: '🐄', ready: false },
+  { id: 'soon-a', ready: false },
+  { id: 'soon-b', ready: false },
+  { id: 'soon-c', ready: false },
 ]
+
+const PLAYER_NAME_MAX = 15
+const DEFAULT_PLAYER_NAME = 'Player'
+
+function sanitizePlayerNameInput(raw) {
+  return String(raw).replace(/[^A-Za-z0-9]/g, '').slice(0, PLAYER_NAME_MAX)
+}
+
+function loadPlayerNameFromStorage() {
+  const cleaned = sanitizePlayerNameInput(localStorage.getItem('playerName') || '')
+  return cleaned || DEFAULT_PLAYER_NAME
+}
+
+function effectivePlayerName(name) {
+  const s = sanitizePlayerNameInput(name)
+  return s || DEFAULT_PLAYER_NAME
+}
 
 const MAP_SIZE = 4000
 const PLAYER_NAMES = [
@@ -276,10 +293,7 @@ function makePellets() {
 
 export default function App() {
   const [screen, setScreen] = useState('picker') // picker | login | game | dead
-  const [playerName, setPlayerName] = useState(() => {
-    const saved = localStorage.getItem('playerName')
-    return saved && PLAYER_NAMES.includes(saved) ? saved : PLAYER_NAMES[0]
-  })
+  const [playerName, setPlayerName] = useState(loadPlayerNameFromStorage)
   const [killedBy, setKilledBy] = useState('')
   const [myScore, setMyScore] = useState(0)
   const canvasRef = useRef(null)
@@ -358,10 +372,10 @@ export default function App() {
 
   useEffect(() => { mutedRef.current = muted }, [muted])
 
-  // Keep playerNameRef in sync + persist selection
+  // Keep playerNameRef in sync + persist (alphanumeric only, max 15)
   useEffect(() => {
-    playerNameRef.current = playerName
-    localStorage.setItem('playerName', playerName)
+    playerNameRef.current = effectivePlayerName(playerName)
+    localStorage.setItem('playerName', sanitizePlayerNameInput(playerName))
   }, [playerName])
 
   // Preload player avatars
@@ -443,7 +457,7 @@ export default function App() {
 
     const me = {
       id: 'mock-player',
-      name: playerName,
+      name: effectivePlayerName(playerName),
       x: MAP_SIZE / 2,
       y: MAP_SIZE / 2,
       radius: 20,
@@ -551,13 +565,14 @@ export default function App() {
   // Handle play
   const handlePlay = useCallback(() => {
     getAudio() // warm up AudioContext on user gesture
+    const name = effectivePlayerName(playerName)
     if (MOCK_MODE) {
       setMyScore(0)
       setScreen('game')
       return
     }
     if (!socket.connected) socket.connect()
-    socket.emit('login', { name: playerName })
+    socket.emit('login', { name })
   }, [playerName])
 
   // Handle restart
@@ -972,7 +987,7 @@ export default function App() {
       <div className="game-picker-screen">
         <div className="game-picker-bg" aria-hidden />
         <header className="game-picker-header">
-          <h1 className="game-picker-title">Arcade</h1>
+          <h1 className="game-picker-title">Netgain Arcade</h1>
           <p className="game-picker-sub">Pick a game — more landing here over time</p>
         </header>
         <div className="game-picker-grid">
@@ -988,9 +1003,15 @@ export default function App() {
                 if (g.id === 'netgame') setScreen('login')
               }}
             >
-              <span className="game-tile-icon">{g.icon}</span>
-              <span className="game-tile-title">{g.title}</span>
-              <span className="game-tile-blurb">{g.blurb}</span>
+              {g.ready ? (
+                <>
+                  <span className="game-tile-icon">{g.icon}</span>
+                  <span className="game-tile-title">{g.title}</span>
+                  <span className="game-tile-blurb">{g.blurb}</span>
+                </>
+              ) : (
+                <span className="game-tile-title game-tile-title--placeholder">Placeholder</span>
+              )}
             </button>
           ))}
         </div>
@@ -1007,17 +1028,20 @@ export default function App() {
         <h1 className="game-title">NetGame</h1>
         <p className="game-subtitle">Eat or be eaten</p>
         {MOCK_MODE && <p className="mock-badge">⚠ Mock Mode — no server needed</p>}
-        <select
-          className="name-select"
+        <input
+          type="text"
+          className="name-input"
           value={playerName}
-          onChange={e => setPlayerName(e.target.value)}
-        >
-          {PLAYER_NAMES.map(name => (
-            <option key={name} value={name}>{name}</option>
-          ))}
-        </select>
+          onChange={e => setPlayerName(sanitizePlayerNameInput(e.target.value))}
+          maxLength={PLAYER_NAME_MAX}
+          placeholder="Name (A–Z, 0–9)"
+          autoComplete="off"
+          spellCheck={false}
+          aria-label="Player name"
+        />
         <button className="play-btn" onClick={handlePlay} disabled={!serverOnline && !MOCK_MODE}>Play</button>
         {!serverOnline && !MOCK_MODE && <div className="server-offline-banner">Server Offline</div>}
+        <p className="login-credits">Created By: Nick Kenner & Andrew Stafford</p>
       </div>
     )
   }

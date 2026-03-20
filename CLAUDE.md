@@ -9,7 +9,7 @@ The client is a **single-page React app** built with Vite. **Game picker → per
 ## App flow (client)
 
 1. **Game picker** — Landing grid of game tiles. Only **NetGame** is wired; other tiles are “coming soon” and are not clickable.
-2. **NetGame login** — Name select + Play; optional **← All games** returns to the picker.
+2. **NetGame login** — Name input (alphanumeric, max 15, stored in `localStorage`) + Play; optional **← All games** returns to the picker.
 3. **Game** — Canvas + Socket.IO sync.
 4. **Dead** — Game over + Play again (still NetGame).
 
@@ -25,7 +25,33 @@ The client is a **single-page React app** built with Vite. **Game picker → per
 | Styles | `src/App.css` |
 | HTTP + Socket.IO + game tick | `server/index.js` |
 | Container image | `Dockerfile` — installs deps, `npm run build`, serves `dist` on port 3000, runs `node --expose-gc server/index.js` |
-| Remote deploy helper | `deploy-remote.sh` — builds `linux/amd64` image locally, saves/loads on VPS, runs container with `--network host` (expects `sshpass`, Docker, and SSH access; **do not commit secrets** — use env vars or prompt locally for `PASS`) |
+| Remote deploy helper | `deploy-remote.sh` — reads **`DEPLOY_PASSWORD`** (and optional **`RESTART_TOKEN`**) from **`.env`** in the repo root; builds `linux/amd64`, saves/loads on VPS, runs container with `--network host`. Requires `sshpass`, Docker, and SSH. **Never commit `.env`** — use `.env.example` as a template. |
+
+## Build & deploy (required agent workflow)
+
+The assistant **must** keep artifacts in sync with source and **tell the operator when finished** (or what failed).
+
+### Frontend changes → new `dist/`
+
+Whenever anything that affects the shipped client changes — including **`src/`** (e.g. `App.jsx`, `App.css`), **`public/`** (assets copied into `dist`), **`vite.config.js`**, **`index.html`**, or **`package.json` / lockfile** dependencies used at build time — run a **production Vite build** so `dist/index.html` (single-file bundle) is up to date:
+
+```bash
+npm run build
+# or, if `vite` is not on PATH:
+node node_modules/vite/bin/vite.js build
+```
+
+Commit `dist/index.html` when the team tracks built output in git.
+
+### Server / container changes → new image + upload
+
+Whenever anything that affects the **running Node server** or **Docker image** changes — including **`server/index.js`**, **`Dockerfile`**, or client files that must be **baked into the image** (the image runs `npm run build` during `docker build`, so a full image rebuild also refreshes `dist` inside the container) — **rebuild the `linux/amd64` image and deploy** to the VPS using `./deploy-remote.sh` (from bash/WSL with `sshpass` and Docker available), or the equivalent manual `docker build` → `docker save` → `scp` → remote `docker load` / `docker run`.
+
+If deploy cannot run from the environment (e.g. WSL/SSH/`sshpass` unavailable), the assistant must **still run local `docker build`** when possible, then **state clearly** that the operator must run `deploy-remote.sh` (or manual steps) to update production.
+
+### Operator notification
+
+After attempting these steps, the assistant should **explicitly confirm**: e.g. “`dist` rebuilt”, “Docker image built locally”, “deploy to VPS completed”, or “deploy skipped — reason …”.
 
 ## Server behavior (summary)
 
