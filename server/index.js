@@ -10,7 +10,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const MAP_SIZE = 4000
 const TICK_RATE = 1000 / 30
 const MAX_PELLETS = 500
+const GOLD_PELLET_CHANCE = 0.09
+const SUPER_PELLET_CHANCE = 0.01
 const PELLET_RADIUS = 5
+const PELLET_SCORE = 4
+const SUPER_RADIUS_MULT = 5
+const SUPER_SCORE_MULT = 5
+const SUPER_DRIFT_SPEED = 5.2
+const GOLD_BONUS_SCORE = 14
 const BASE_SPEED = 10
 const START_SCORE = 10
 const EAT_THRESHOLD = 1.1
@@ -41,14 +48,81 @@ function randomColor() {
   return PLAYER_COLORS[Math.floor(Math.random() * PLAYER_COLORS.length)]
 }
 
+function randomSuperVelocity() {
+  const a = Math.random() * Math.PI * 2
+  return {
+    vx: Math.cos(a) * SUPER_DRIFT_SPEED,
+    vy: Math.sin(a) * SUPER_DRIFT_SPEED
+  }
+}
+
 function spawnPellet() {
+  const roll = Math.random()
+  if (roll < SUPER_PELLET_CHANCE) {
+    const radius = PELLET_RADIUS * SUPER_RADIUS_MULT
+    const pad = radius + 35
+    const pos = {
+      x: pad + Math.random() * (MAP_SIZE - pad * 2),
+      y: pad + Math.random() * (MAP_SIZE - pad * 2)
+    }
+    const { vx, vy } = randomSuperVelocity()
+    return {
+      id: pelletIdCounter++,
+      x: pos.x,
+      y: pos.y,
+      color: '#fef3c7',
+      radius,
+      kind: 'super',
+      vx,
+      vy
+    }
+  }
   const pos = randomPos(10)
+  const goldCap = SUPER_PELLET_CHANCE + (1 - SUPER_PELLET_CHANCE) * GOLD_PELLET_CHANCE
+  const gold = roll < goldCap
   return {
     id: pelletIdCounter++,
     x: pos.x,
     y: pos.y,
-    color: randomColor(),
-    radius: PELLET_RADIUS
+    color: gold ? '#fbbf24' : randomColor(),
+    radius: gold ? PELLET_RADIUS * 1.35 : PELLET_RADIUS,
+    kind: gold ? 'gold' : 'normal'
+  }
+}
+
+function stepSuperPellets() {
+  for (const pellet of pellets) {
+    if (pellet.kind !== 'super' || typeof pellet.vx !== 'number') continue
+    pellet.x += pellet.vx
+    pellet.y += pellet.vy
+    const rad = pellet.radius
+    let bounced = false
+    if (pellet.x < rad) {
+      pellet.x = rad
+      pellet.vx *= -1
+      bounced = true
+    } else if (pellet.x > MAP_SIZE - rad) {
+      pellet.x = MAP_SIZE - rad
+      pellet.vx *= -1
+      bounced = true
+    }
+    if (pellet.y < rad) {
+      pellet.y = rad
+      pellet.vy *= -1
+      bounced = true
+    } else if (pellet.y > MAP_SIZE - rad) {
+      pellet.y = MAP_SIZE - rad
+      pellet.vy *= -1
+      bounced = true
+    }
+    if (bounced) {
+      pellet.vx += (Math.random() - 0.5) * 2.8
+      pellet.vy += (Math.random() - 0.5) * 2.8
+      const len = Math.hypot(pellet.vx, pellet.vy)
+      const scale = SUPER_DRIFT_SPEED / (len || 1)
+      pellet.vx *= scale
+      pellet.vy *= scale
+    }
   }
 }
 
@@ -85,7 +159,23 @@ function spawnPlayer(id, name) {
 }
 
 // ---- Express + Socket.IO ----
+const RESTART_TOKEN = process.env.RESTART_TOKEN || 'netgame-dev-restart'
+const IDLE_RESTART_MS = parseInt(process.env.IDLE_RESTART_MS || String(15 * 60 * 1000), 10)
+
 const app = express()
+app.use(express.json())
+
+// Hidden ops (wrong token → 404). POST JSON or query: { token } / ?token=
+app.post('/__netgame/restart', (req, res) => {
+  const token = req.query.token || req.body?.token
+  if (token !== RESTART_TOKEN) {
+    res.status(404).send('Not found')
+    return
+  }
+  res.json({ ok: true, restarting: true })
+  setTimeout(() => process.exit(0), 200)
+})
+
 app.use(express.static(path.join(__dirname, '../dist')))
 
 const httpServer = createServer(app)
@@ -93,10 +183,27 @@ const io = new Server(httpServer, {
   cors: { origin: '*' }
 })
 
+let idleExitTimer = null
+function updateIdleRestart() {
+  const n = io.of('/').sockets.size
+  if (n === 0) {
+    if (!idleExitTimer) {
+      idleExitTimer = setTimeout(() => {
+        console.log('[maintenance] idle: no clients, exiting (container should restart)')
+        process.exit(0)
+      }, IDLE_RESTART_MS)
+    }
+  } else if (idleExitTimer) {
+    clearTimeout(idleExitTimer)
+    idleExitTimer = null
+  }
+}
+
 // ---- Socket Handlers ----
 io.on('connection', (socket) => {
   try {
     console.log(`Connected: ${socket.id}`)
+    updateIdleRestart()
 
     socket.on('login', ({ name }) => {
       try {
@@ -143,6 +250,7 @@ io.on('connection', (socket) => {
       try {
         console.log(`Disconnected: ${socket.id}`)
         delete players[socket.id]
+        updateIdleRestart()
       } catch (err) {
         console.error(`Error in disconnect handler (${socket.id}):`, err.message)
       }
@@ -155,8 +263,14 @@ io.on('connection', (socket) => {
 // ---- Game Loop ----
 fillPellets()
 
+let tickCount = 0
 setInterval(() => {
   try {
+    tickCount++
+    if (tickCount % 1800 === 0 && typeof global.gc === 'function') {
+      global.gc()
+    }
+
     const alivePlayers = Object.values(players).filter(p => p.alive)
 
     // Move players
@@ -171,12 +285,17 @@ setInterval(() => {
       p.y = Math.max(p.radius, Math.min(MAP_SIZE - p.radius, p.y))
     }
 
+    stepSuperPellets()
+
     // Pellet collisions
     for (const p of alivePlayers) {
       pellets = pellets.filter(pellet => {
         const dist = Math.hypot(p.x - pellet.x, p.y - pellet.y)
         if (dist < p.radius + pellet.radius) {
-          p.score += 4
+          let gain = PELLET_SCORE
+          if (pellet.kind === 'gold') gain = PELLET_SCORE + GOLD_BONUS_SCORE
+          else if (pellet.kind === 'super') gain = PELLET_SCORE * SUPER_SCORE_MULT
+          p.score += gain
           p.radius = radiusFromScore(p.score)
           return false
         }
@@ -212,7 +331,8 @@ setInterval(() => {
         score: p.score, radius: p.radius, color: p.color
       })),
       pellets: pellets.map(p => ({
-        id: p.id, x: p.x, y: p.y, color: p.color, radius: p.radius
+        id: p.id, x: p.x, y: p.y, color: p.color, radius: p.radius,
+        kind: p.kind || 'normal'
       }))
     }
     io.emit('gameState', state)
@@ -242,6 +362,8 @@ io.on('error', (err) => {
 const PORT = process.env.PORT || 3000
 httpServer.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`)
+  console.log(`[maintenance] idle restart after ${IDLE_RESTART_MS}ms with 0 clients`)
+  setImmediate(updateIdleRestart)
 })
 
 httpServer.on('error', (err) => {

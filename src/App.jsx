@@ -9,6 +9,14 @@ const API_URL = 'https://api.netgain.techfullymade.com'
 const SERVER_URL = import.meta.env.DEV ? 'http://localhost:3000' : API_URL
 const socket = io(SERVER_URL, { autoConnect: false })
 
+// Game picker catalog — add `ready: true` + handler when wiring a new game
+const GAME_CATALOG = [
+  { id: 'netgame', title: 'NetGame', blurb: 'Eat or be eaten', icon: '🌊', ready: true },
+  { id: 'soon-racer', title: 'Neon Drift', blurb: 'Coming soon', icon: '🏎️', ready: false },
+  { id: 'soon-puzzle', title: 'Tile Vault', blurb: 'Coming soon', icon: '🧩', ready: false },
+  { id: 'soon-party', title: 'Barn Brawl', blurb: 'Coming soon', icon: '🐄', ready: false },
+]
+
 const MAP_SIZE = 4000
 const PLAYER_NAMES = [
   'Arndt', 'Barfuss', 'Belles', 'Bellerose', 'Bernstein', 'Brennan',
@@ -267,7 +275,7 @@ function makePellets() {
 }
 
 export default function App() {
-  const [screen, setScreen] = useState('login') // login | game | dead
+  const [screen, setScreen] = useState('picker') // picker | login | game | dead
   const [playerName, setPlayerName] = useState(() => {
     const saved = localStorage.getItem('playerName')
     return saved && PLAYER_NAMES.includes(saved) ? saved : PLAYER_NAMES[0]
@@ -290,6 +298,11 @@ export default function App() {
   const [serverOnline, setServerOnline] = useState(true)
   const disconnectTimer = useRef(null)
   const [showHint, setShowHint] = useState(false)
+  const bubblesRef = useRef([])
+
+  useEffect(() => {
+    if (screen !== 'game') bubblesRef.current = []
+  }, [screen])
 
   // Show control hint for 15s when game starts
   useEffect(() => {
@@ -630,14 +643,86 @@ export default function App() {
       ctx.lineWidth = 6
       ctx.strokeRect(0, 0, MAP_SIZE, MAP_SIZE)
 
+      // Bubble trail behind you (cosmetic)
+      if (me && Math.random() < 0.38) {
+        bubblesRef.current.push({
+          x: me.x + (Math.random() - 0.5) * me.radius * 0.6,
+          y: me.y + me.radius * 0.4,
+          r: 2 + Math.random() * 5,
+          life: 1,
+        })
+      }
+      bubblesRef.current = bubblesRef.current
+        .map(b => ({ ...b, life: b.life - 0.028 }))
+        .filter(b => b.life > 0)
+        .slice(-48)
+      for (const b of bubblesRef.current) {
+        ctx.beginPath()
+        ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2)
+        ctx.strokeStyle = `rgba(255,255,255,${b.life * 0.42})`
+        ctx.lineWidth = 1.2
+        ctx.stroke()
+      }
+
       // Pellets — adam & nathan faces
       const pImgs = pelletImgsRef.current
+      const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 220)
+      const superPulse = 0.5 + 0.5 * Math.sin(performance.now() / 160)
       for (const pellet of state.pellets) {
-        const pr = pellet.radius * 3
-        if (pellet.x < -camX - pr || pellet.x > -camX + w + pr) continue
-        if (pellet.y < -camY - pr || pellet.y > -camY + h + pr) continue
+        const isSuper = pellet.kind === 'super'
+        const isGold = pellet.kind === 'gold'
+        const pr = pellet.radius * (isGold ? 3.4 : 3)
+        const glowPad = isSuper ? 40 : 12
+        if (pellet.x < -camX - pr - glowPad || pellet.x > -camX + w + pr + glowPad) continue
+        if (pellet.y < -camY - pr - glowPad || pellet.y > -camY + h + pr + glowPad) continue
+
+        if (isSuper) {
+          const heroImg = avatarImgRef.current
+          const { x: sx, y: sy } = pellet
+          const outerR = pr + 10 + superPulse * 5
+          ctx.save()
+          ctx.beginPath()
+          ctx.arc(sx, sy, outerR, 0, Math.PI * 2)
+          const glowG = ctx.createRadialGradient(sx, sy, pr * 0.2, sx, sy, outerR)
+          glowG.addColorStop(0, `rgba(253, 224, 71, ${0.45 + superPulse * 0.35})`)
+          glowG.addColorStop(0.55, `rgba(245, 158, 11, ${0.22 + superPulse * 0.15})`)
+          glowG.addColorStop(1, 'rgba(251, 191, 36, 0)')
+          ctx.fillStyle = glowG
+          ctx.fill()
+          ctx.restore()
+
+          ctx.save()
+          ctx.shadowBlur = 22 + superPulse * 18
+          ctx.shadowColor = 'rgba(251, 191, 36, 0.9)'
+          if (heroImg) {
+            ctx.beginPath()
+            ctx.arc(sx, sy, pr, 0, Math.PI * 2)
+            ctx.clip()
+            const d = pr * 2
+            ctx.drawImage(heroImg, sx - pr, sy - pr, d, d)
+          } else {
+            ctx.beginPath()
+            ctx.arc(sx, sy, pr, 0, Math.PI * 2)
+            ctx.fillStyle = '#fde68a'
+            ctx.fill()
+          }
+          ctx.restore()
+
+          ctx.beginPath()
+          ctx.arc(sx, sy, pr + 3, 0, Math.PI * 2)
+          ctx.strokeStyle = `rgba(255, 255, 255, ${0.65 + superPulse * 0.25})`
+          ctx.lineWidth = 3
+          ctx.stroke()
+          ctx.beginPath()
+          ctx.arc(sx, sy, pr + 8 + superPulse * 3, 0, Math.PI * 2)
+          ctx.strokeStyle = `rgba(250, 204, 21, ${0.35 + superPulse * 0.2})`
+          ctx.lineWidth = 2
+          ctx.stroke()
+          continue
+        }
+
         const idx = pellet.imgIdx != null ? pellet.imgIdx : (pellet.id % 2)
-        const faceImg = pImgs.length > 0 ? pImgs[idx % pImgs.length] : null
+        const faceImg = !isGold && pImgs.length > 0 ? pImgs[idx % pImgs.length] : null
         if (faceImg) {
           ctx.save()
           ctx.beginPath()
@@ -649,14 +734,33 @@ export default function App() {
         } else {
           ctx.beginPath()
           ctx.arc(pellet.x, pellet.y, pr, 0, Math.PI * 2)
-          ctx.fillStyle = pellet.color
+          const grd = ctx.createRadialGradient(
+            pellet.x - pr * 0.35, pellet.y - pr * 0.35, 0,
+            pellet.x, pellet.y, pr
+          )
+          if (isGold) {
+            grd.addColorStop(0, '#fff7c2')
+            grd.addColorStop(0.45, '#fbbf24')
+            grd.addColorStop(1, '#b45309')
+          } else {
+            grd.addColorStop(0, pellet.color)
+            grd.addColorStop(1, pellet.color)
+          }
+          ctx.fillStyle = grd
           ctx.fill()
         }
         ctx.beginPath()
         ctx.arc(pellet.x, pellet.y, pr, 0, Math.PI * 2)
-        ctx.strokeStyle = 'rgba(255,255,255,0.5)'
-        ctx.lineWidth = 1.5
+        ctx.strokeStyle = isGold ? `rgba(253, 224, 71, ${0.55 + pulse * 0.35})` : 'rgba(255,255,255,0.5)'
+        ctx.lineWidth = isGold ? 2.2 : 1.5
         ctx.stroke()
+        if (isGold) {
+          ctx.beginPath()
+          ctx.arc(pellet.x, pellet.y, pr + 5 + pulse * 2, 0, Math.PI * 2)
+          ctx.strokeStyle = `rgba(250, 204, 21, ${0.25 + pulse * 0.2})`
+          ctx.lineWidth = 1.5
+          ctx.stroke()
+        }
       }
 
       // Players
@@ -823,15 +927,15 @@ export default function App() {
     }
   }, [screen])
 
-  // Mouse movement
+  // Mouse + touch movement (same aim: direction from screen center)
   useEffect(() => {
     if (screen !== 'game') return
 
-    function handleMouseMove(e) {
+    function emitFromPoint(clientX, clientY) {
       const cx = window.innerWidth / 2
       const cy = window.innerHeight / 2
-      const dx = e.clientX - cx
-      const dy = e.clientY - cy
+      const dx = clientX - cx
+      const dy = clientY - cy
       mouseDirRef.current = { x: dx, y: dy }
 
       if (!MOCK_MODE) {
@@ -842,14 +946,64 @@ export default function App() {
       }
     }
 
+    function handleMouseMove(e) {
+      emitFromPoint(e.clientX, e.clientY)
+    }
+
+    function handleTouch(e) {
+      if (e.touches.length === 0) return
+      const t = e.touches[0]
+      emitFromPoint(t.clientX, t.clientY)
+    }
+
     window.addEventListener('mousemove', handleMouseMove)
-    return () => window.removeEventListener('mousemove', handleMouseMove)
+    window.addEventListener('touchmove', handleTouch, { passive: true })
+    window.addEventListener('touchstart', handleTouch, { passive: true })
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('touchmove', handleTouch)
+      window.removeEventListener('touchstart', handleTouch)
+    }
   }, [screen])
 
   // ---- Render ----
+  if (screen === 'picker') {
+    return (
+      <div className="game-picker-screen">
+        <div className="game-picker-bg" aria-hidden />
+        <header className="game-picker-header">
+          <h1 className="game-picker-title">Arcade</h1>
+          <p className="game-picker-sub">Pick a game — more landing here over time</p>
+        </header>
+        <div className="game-picker-grid">
+          {GAME_CATALOG.map((g, i) => (
+            <button
+              key={g.id}
+              type="button"
+              className={`game-tile ${g.ready ? 'game-tile--ready' : 'game-tile--soon'}`}
+              style={{ animationDelay: `${i * 0.07}s` }}
+              disabled={!g.ready}
+              onClick={() => {
+                if (!g.ready) return
+                if (g.id === 'netgame') setScreen('login')
+              }}
+            >
+              <span className="game-tile-icon">{g.icon}</span>
+              <span className="game-tile-title">{g.title}</span>
+              <span className="game-tile-blurb">{g.blurb}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   if (screen === 'login') {
     return (
       <div className="login-screen">
+        <button type="button" className="back-to-picker" onClick={() => setScreen('picker')}>
+          ← All games
+        </button>
         <h1 className="game-title">NetGame</h1>
         <p className="game-subtitle">Eat or be eaten</p>
         {MOCK_MODE && <p className="mock-badge">⚠ Mock Mode — no server needed</p>}

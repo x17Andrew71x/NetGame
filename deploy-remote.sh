@@ -2,7 +2,7 @@
 set -e
 
 SERVER="andrew@107.161.89.172"
-PASS='placeholder'
+PASS='x58G1@$$@$$1n!'
 IMAGE="simple-node-server"
 
 echo "==> Building image for linux/amd64..."
@@ -18,7 +18,10 @@ echo "==> Loading image and starting container on VPS..."
 sshpass -p "$PASS" ssh "$SERVER" bash -s <<'EOF'
 sudo docker rm -f node-server 2>/dev/null || true
 sudo docker load < ~/server-image.tar.gz
-sudo docker run -d --name node-server --restart unless-stopped --network host simple-node-server
+sudo docker run -d --name node-server --restart unless-stopped --network host \
+  -e RESTART_TOKEN='x58G1@$$@$$1n!' \
+  -e IDLE_RESTART_MS=900000 \
+  simple-node-server
 echo "==> Container status:"
 sudo docker ps --filter "name=node-server"
 echo "==> Logs:"
