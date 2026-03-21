@@ -21,7 +21,11 @@ const PLAYER_NAME_MAX = 15
 const DEFAULT_PLAYER_NAME = 'Player'
 
 function sanitizePlayerNameInput(raw) {
-  return String(raw).replace(/[^A-Za-z0-9]/g, '').slice(0, PLAYER_NAME_MAX)
+  return String(raw)
+    .replace(/[^A-Za-z0-9 ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, PLAYER_NAME_MAX)
 }
 
 function loadPlayerNameFromStorage() {
@@ -35,6 +39,46 @@ function effectivePlayerName(name) {
 }
 
 const MAP_SIZE = 4000
+const MOCK_MAX_PELLETS = 225
+const MOCK_NORMALS_PER_GOLD = 100
+const MOCK_PELLET_RADIUS = 5
+const MOCK_GOLD_RADIUS = MOCK_PELLET_RADIUS * 3
+const MOCK_PELLET_SCORE = 4
+const MOCK_GOLD_SCORE = MOCK_PELLET_SCORE * 10
+const MOCK_HENRY_PELLET_MULT = 3
+const SERVER_START_SCORE = 10
+const MOCK_HENRY_FIXED_RADIUS = 25 * Math.sqrt(SERVER_START_SCORE) * 4
+const MOCK_HENRY_RANDOM_STEER = 0.0035
+
+// Camera: zoom out as score grows; cap by ~30k score (smoothstep).
+const ZOOM_SCORE_SOFT = 40
+const ZOOM_SCORE_CAP = 30000
+const ZOOM_MAX = 1
+const ZOOM_MIN = 0.42
+
+function zoomFromScore(score) {
+  const s = Math.max(0, score)
+  if (s <= ZOOM_SCORE_SOFT) return ZOOM_MAX
+  if (s >= ZOOM_SCORE_CAP) return ZOOM_MIN
+  const t = (s - ZOOM_SCORE_SOFT) / (ZOOM_SCORE_CAP - ZOOM_SCORE_SOFT)
+  const u = t * t * (3 - 2 * t)
+  return ZOOM_MAX - u * (ZOOM_MAX - ZOOM_MIN)
+}
+
+/** Visible world AABB (for culling + minimap viewport) when centered on (meX, meY). */
+function worldViewBounds(meX, meY, screenW, screenH, zoom) {
+  const vw = screenW / zoom
+  const vh = screenH / zoom
+  return {
+    left: meX - vw / 2,
+    right: meX + vw / 2,
+    top: meY - vh / 2,
+    bottom: meY + vh / 2,
+    vw,
+    vh,
+  }
+}
+
 const PLAYER_NAMES = [
   'Arndt', 'Barfuss', 'Belles', 'Bellerose', 'Bernstein', 'Brennan',
   'Bronson', 'DenHann', 'Flanagan', 'Groesbeck', 'Hunsaker', 'Jones',
@@ -281,14 +325,88 @@ function startMusic(ctx, mutedRef) {
 }
 
 function makePellets() {
-  return Array.from({ length: 300 }, (_, i) => ({
-    id: i,
+  const pellets = []
+  for (let i = 0; i < MOCK_MAX_PELLETS; i++) {
+    const n = pellets.filter(p => p.kind === 'normal').length
+    const g = pellets.filter(p => p.kind === 'gold').length
+    const gold = g < Math.floor(n / MOCK_NORMALS_PER_GOLD)
+    if (gold) {
+      const sp = 3 + Math.random() * 3
+      const a = Math.random() * Math.PI * 2
+      pellets.push({
+        id: i,
+        x: Math.random() * MAP_SIZE,
+        y: Math.random() * MAP_SIZE,
+        radius: MOCK_GOLD_RADIUS,
+        color: '#fbbf24',
+        kind: 'gold',
+        imgIdx: Math.floor(Math.random() * 2),
+        vx: Math.cos(a) * sp,
+        vy: Math.sin(a) * sp,
+      })
+    } else {
+      const stationary = Math.random() < 0.45
+      let vx = 0
+      let vy = 0
+      if (!stationary) {
+        const s = 0.1 + Math.random() * 0.15
+        const a = Math.random() * Math.PI * 2
+        vx = Math.cos(a) * s
+        vy = Math.sin(a) * s
+      }
+      pellets.push({
+        id: i,
+        x: Math.random() * MAP_SIZE,
+        y: Math.random() * MAP_SIZE,
+        radius: MOCK_PELLET_RADIUS,
+        color: COLORS[Math.floor(Math.random() * COLORS.length)],
+        kind: 'normal',
+        vx,
+        vy,
+      })
+    }
+  }
+  return pellets
+}
+
+function mockSpawnOnePellet(pellets) {
+  const n = pellets.filter(p => p.kind === 'normal').length
+  const g = pellets.filter(p => p.kind === 'gold').length
+  const gold = g < Math.floor(n / MOCK_NORMALS_PER_GOLD)
+  if (gold) {
+    const sp = 3 + Math.random() * 3
+    const a = Math.random() * Math.PI * 2
+    return {
+      id: Date.now() + Math.random(),
+      x: Math.random() * MAP_SIZE,
+      y: Math.random() * MAP_SIZE,
+      radius: MOCK_GOLD_RADIUS,
+      color: '#fbbf24',
+      kind: 'gold',
+      imgIdx: Math.floor(Math.random() * 2),
+      vx: Math.cos(a) * sp,
+      vy: Math.sin(a) * sp,
+    }
+  }
+  const stationary = Math.random() < 0.45
+  let vx = 0
+  let vy = 0
+  if (!stationary) {
+    const s = 0.1 + Math.random() * 0.15
+    const a = Math.random() * Math.PI * 2
+    vx = Math.cos(a) * s
+    vy = Math.sin(a) * s
+  }
+  return {
+    id: Date.now() + Math.random(),
     x: Math.random() * MAP_SIZE,
     y: Math.random() * MAP_SIZE,
-    radius: 4 + Math.random() * 6,
+    radius: MOCK_PELLET_RADIUS,
     color: COLORS[Math.floor(Math.random() * COLORS.length)],
-    imgIdx: Math.floor(Math.random() * 2),
-  }))
+    kind: 'normal',
+    vx,
+    vy,
+  }
 }
 
 export default function App() {
@@ -306,8 +424,9 @@ export default function App() {
   const avatarImgRef = useRef(null)
   const audioCtxRef = useRef(null)
   const musicLoopRef = useRef(null)
-  const [muted, setMuted] = useState(false)
-  const mutedRef = useRef(false)
+  const stopOceanRef = useRef(null)
+  const [muted, setMuted] = useState(true)
+  const mutedRef = useRef(true)
   const [deathLeaderboard, setDeathLeaderboard] = useState([])
   const [serverOnline, setServerOnline] = useState(true)
   const disconnectTimer = useRef(null)
@@ -366,7 +485,9 @@ export default function App() {
     if (!audioCtxRef.current) {
       audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)()
     }
-    if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume()
+    if (!mutedRef.current && audioCtxRef.current.state === 'suspended') {
+      void audioCtxRef.current.resume()
+    }
     return audioCtxRef.current
   }
 
@@ -385,29 +506,69 @@ export default function App() {
     img.onload = () => { avatarImgRef.current = img }
   }, [])
 
-  // Preload pellet face images
-  const pelletImgsRef = useRef([])
+  // Small pellets: logo. Gold (large) pellets: Adam / Nathan faces (indexed 0/1).
+  const pelletLogoRef = useRef(null)
+  const pelletFaceImgsRef = useRef([null, null])
   useEffect(() => {
-    const srcs = ['/adam.jpg', '/nathan.jpg']
-    srcs.forEach(src => {
+    const logo = new Image()
+    logo.src = '/logo.jpg'
+    logo.onload = () => { pelletLogoRef.current = logo }
+    ;['/adam.jpg', '/nathan.jpg'].forEach((src, i) => {
       const img = new Image()
       img.src = src
-      img.onload = () => { pelletImgsRef.current.push(img) }
+      img.onload = () => { pelletFaceImgsRef.current[i] = img }
     })
   }, [])
 
-  // Music
+  // Music + ocean: only while in-game and unmuted; suspend Web Audio when muted so nothing plays.
   useEffect(() => {
     if (screen !== 'game') {
-      clearInterval(musicLoopRef.current)
+      if (musicLoopRef.current != null) {
+        clearInterval(musicLoopRef.current)
+        musicLoopRef.current = null
+      }
+      if (stopOceanRef.current) {
+        stopOceanRef.current()
+        stopOceanRef.current = null
+      }
       return
     }
+    if (muted) {
+      if (musicLoopRef.current != null) {
+        clearInterval(musicLoopRef.current)
+        musicLoopRef.current = null
+      }
+      if (stopOceanRef.current) {
+        stopOceanRef.current()
+        stopOceanRef.current = null
+      }
+      if (audioCtxRef.current?.state === 'running') {
+        void audioCtxRef.current.suspend()
+      }
+      return
+    }
+
     const ctx = getAudio()
+    if (ctx.state === 'suspended') void ctx.resume()
+
+    if (musicLoopRef.current != null) clearInterval(musicLoopRef.current)
+    if (stopOceanRef.current) {
+      stopOceanRef.current()
+      stopOceanRef.current = null
+    }
+
     const id = startMusic(ctx, mutedRef)
     musicLoopRef.current = id
-    const stopOcean = startOceanSounds(ctx, mutedRef)
-    return () => { clearInterval(id); stopOcean() }
-  }, [screen])
+    stopOceanRef.current = startOceanSounds(ctx, mutedRef)
+
+    return () => {
+      clearInterval(id)
+      if (stopOceanRef.current) {
+        stopOceanRef.current()
+        stopOceanRef.current = null
+      }
+    }
+  }, [screen, muted])
 
   // Socket listeners (real mode only)
   useEffect(() => {
@@ -443,7 +604,25 @@ export default function App() {
   useEffect(() => {
     if (!MOCK_MODE || screen !== 'game') return
 
-    const bots = Array.from({ length: 5 }, (_, i) => ({
+    const MOCK_HENRY_SCORE_MULT = 3
+
+    const ha = Math.random() * Math.PI * 2
+    const hm = MOCK_HENRY_FIXED_RADIUS + 60
+    const henry = {
+      id: 'henry-bot',
+      name: 'HenryaBOT',
+      x: hm + Math.random() * (MAP_SIZE - hm * 2),
+      y: hm + Math.random() * (MAP_SIZE - hm * 2),
+      radius: MOCK_HENRY_FIXED_RADIUS,
+      color: '#f59e0b',
+      score: 5000,
+      dx: Math.cos(ha),
+      dy: Math.sin(ha),
+      henrySpeed: 17 + Math.random() * 3,
+      isHenry: true,
+    }
+
+    const bots = Array.from({ length: 4 }, (_, i) => ({
       id: `bot-${i}`,
       name: PLAYER_NAMES[i + 1] || `Bot ${i + 1}`,
       x: Math.random() * MAP_SIZE,
@@ -453,6 +632,7 @@ export default function App() {
       score: 0,
       vx: (Math.random() - 0.5) * 3,
       vy: (Math.random() - 0.5) * 3,
+      isHenry: false,
     }))
 
     const me = {
@@ -463,10 +643,11 @@ export default function App() {
       radius: 20,
       color: '#0ea5e9',
       score: 0,
+      isHenry: false,
     }
 
     myIdRef.current = 'mock-player'
-    gameStateRef.current = { players: [me, ...bots], pellets: makePellets() }
+    gameStateRef.current = { players: [me, henry, ...bots], pellets: makePellets() }
 
     const interval = setInterval(() => {
       const state = gameStateRef.current
@@ -482,8 +663,86 @@ export default function App() {
         player.y = Math.max(player.radius, Math.min(MAP_SIZE - player.radius, player.y + (my / dist) * speed))
       }
 
+      // Henry: wall bounce + periodic random steer (same idea as server)
+      const h = state.players.find(p => p.id === 'henry-bot')
+      if (h) {
+        h.x += h.dx * h.henrySpeed
+        h.y += h.dy * h.henrySpeed
+        const r = h.radius
+        if (h.x < r) {
+          h.x = r
+          h.dx *= -1
+        } else if (h.x > MAP_SIZE - r) {
+          h.x = MAP_SIZE - r
+          h.dx *= -1
+        }
+        if (h.y < r) {
+          h.y = r
+          h.dy *= -1
+        } else if (h.y > MAP_SIZE - r) {
+          h.y = MAP_SIZE - r
+          h.dy *= -1
+        }
+        if (Math.random() < MOCK_HENRY_RANDOM_STEER) {
+          const a = Math.random() * Math.PI * 2
+          h.dx = Math.cos(a)
+          h.dy = Math.sin(a)
+        }
+      }
+
+      // Pellet drift (match server feel)
+      for (const pellet of state.pellets) {
+        if (pellet.kind === 'gold') {
+          if (Math.random() < 0.03) {
+            const sp = 3 + Math.random() * 3
+            const a = Math.random() * Math.PI * 2
+            pellet.vx = Math.cos(a) * sp
+            pellet.vy = Math.sin(a) * sp
+          }
+        } else if ((pellet.vx || pellet.vy) && Math.random() < 0.04) {
+          pellet.vx += (Math.random() - 0.5) * 0.06
+          pellet.vy += (Math.random() - 0.5) * 0.06
+          const len = Math.hypot(pellet.vx, pellet.vy)
+          if (len > 0.25) {
+            const s = 0.25 / len
+            pellet.vx *= s
+            pellet.vy *= s
+          }
+        }
+        pellet.x += pellet.vx
+        pellet.y += pellet.vy
+        const rad = pellet.radius
+        if (pellet.kind === 'gold') {
+          if (pellet.x < rad) { pellet.x = rad; pellet.vx *= -1 }
+          else if (pellet.x > MAP_SIZE - rad) { pellet.x = MAP_SIZE - rad; pellet.vx *= -1 }
+          if (pellet.y < rad) { pellet.y = rad; pellet.vy *= -1 }
+          else if (pellet.y > MAP_SIZE - rad) { pellet.y = MAP_SIZE - rad; pellet.vy *= -1 }
+          pellet.vx += (Math.random() - 0.5) * 1.2
+          pellet.vy += (Math.random() - 0.5) * 1.2
+          const len = Math.hypot(pellet.vx, pellet.vy)
+          if (len > 1e-6) {
+            const sp = 3 + Math.random() * 3
+            pellet.vx = (pellet.vx / len) * sp
+            pellet.vy = (pellet.vy / len) * sp
+          }
+        } else if (pellet.vx || pellet.vy) {
+          if (pellet.x < rad) { pellet.x = rad; pellet.vx *= -1 }
+          else if (pellet.x > MAP_SIZE - rad) { pellet.x = MAP_SIZE - rad; pellet.vx *= -1 }
+          if (pellet.y < rad) { pellet.y = rad; pellet.vy *= -1 }
+          else if (pellet.y > MAP_SIZE - rad) { pellet.y = MAP_SIZE - rad; pellet.vy *= -1 }
+          pellet.vx += (Math.random() - 0.5) * 0.04
+          pellet.vy += (Math.random() - 0.5) * 0.04
+          const len2 = Math.hypot(pellet.vx, pellet.vy)
+          if (len2 > 0.25) {
+            const s = 0.25 / len2
+            pellet.vx *= s
+            pellet.vy *= s
+          }
+        }
+      }
+
       // Move bots (wander + bounce off walls)
-      for (const bot of state.players.filter(p => p.id !== 'mock-player')) {
+      for (const bot of state.players.filter(p => p.id !== 'mock-player' && !p.isHenry)) {
         bot.x += bot.vx
         bot.y += bot.vy
         if (bot.x < bot.radius || bot.x > MAP_SIZE - bot.radius) bot.vx *= -1
@@ -492,7 +751,7 @@ export default function App() {
         bot.y = Math.max(bot.radius, Math.min(MAP_SIZE - bot.radius, bot.y))
       }
 
-      // Eat players — bigger blob absorbs smaller one's mass
+      // Eat players — score determines winner, not visual radius
       for (let i = 0; i < state.players.length; i++) {
         const eater = state.players[i]
         for (let j = 0; j < state.players.length; j++) {
@@ -501,22 +760,26 @@ export default function App() {
           const dx = eater.x - prey.x
           const dy = eater.y - prey.y
           const dist = Math.sqrt(dx * dx + dy * dy)
-          // Must be 10% bigger and overlapping prey's center
-          if (eater.radius > prey.radius * 1.1 && dist < eater.radius) {
-            // Absorb prey's mass (mass = radius²)
-            eater.radius = Math.sqrt(eater.radius * eater.radius + prey.radius * prey.radius)
+          if (eater.score > prey.score * 1.1 && dist < eater.radius && !prey.isHenry) {
+            const gain = Math.floor(prey.score / 2)
+            eater.score += eater.isHenry ? Math.ceil(gain * MOCK_HENRY_SCORE_MULT) : gain
+            if (eater.isHenry) {
+              const a = Math.random() * Math.PI * 2
+              eater.dx = Math.cos(a)
+              eater.dy = Math.sin(a)
+            }
+            if (!eater.isHenry) {
+              eater.radius = Math.sqrt(eater.radius ** 2 + prey.radius ** 2)
+            }
             if (eater.id === 'mock-player') {
-              eater.score += Math.floor(prey.radius * 3)
               setMyScore(eater.score)
               if (!mutedRef.current) playEatPlayerSound(getAudio())
             }
             if (prey.id === 'mock-player') {
-              // Player got eaten — go to dead screen
               setKilledBy(eater.name)
               setScreen('dead')
               return
             } else {
-              // Respawn bot small on the other side of the map
               prey.x = Math.random() * MAP_SIZE
               prey.y = Math.random() * MAP_SIZE
               prey.radius = 15 + Math.random() * 10
@@ -532,10 +795,17 @@ export default function App() {
         for (const p of state.players) {
           const dx = p.x - pellet.x
           const dy = p.y - pellet.y
-          if (Math.sqrt(dx * dx + dy * dy) < p.radius) {
-            p.radius += 1
+          if (Math.sqrt(dx * dx + dy * dy) < p.radius + pellet.radius) {
+            let gain = pellet.kind === 'gold' ? MOCK_GOLD_SCORE : MOCK_PELLET_SCORE
+            if (p.isHenry) gain = Math.ceil(gain * MOCK_HENRY_PELLET_MULT)
+            p.score += gain
+            if (p.isHenry) {
+              const a = Math.random() * Math.PI * 2
+              p.dx = Math.cos(a)
+              p.dy = Math.sin(a)
+            }
+            if (!p.isHenry) p.radius += 1
             if (p.id === 'mock-player') {
-              p.score += 1
               setMyScore(p.score)
               ateAPellet = true
             }
@@ -547,15 +817,8 @@ export default function App() {
       if (ateAPellet && !mutedRef.current) playPelletSound(getAudio())
 
       // Respawn pellets
-      while (state.pellets.length < 300) {
-        state.pellets.push({
-          id: Date.now() + Math.random(),
-          x: Math.random() * MAP_SIZE,
-          y: Math.random() * MAP_SIZE,
-          radius: 4 + Math.random() * 6,
-          color: COLORS[Math.floor(Math.random() * COLORS.length)],
-          imgIdx: Math.floor(Math.random() * 2),
-        })
+      while (state.pellets.length < MOCK_MAX_PELLETS) {
+        state.pellets.push(mockSpawnOnePellet(state.pellets))
       }
     }, 1000 / 30)
 
@@ -564,7 +827,7 @@ export default function App() {
 
   // Handle play
   const handlePlay = useCallback(() => {
-    getAudio() // warm up AudioContext on user gesture
+    if (!muted) getAudio() // user gesture + only if sound on
     const name = effectivePlayerName(playerName)
     if (MOCK_MODE) {
       setMyScore(0)
@@ -573,17 +836,18 @@ export default function App() {
     }
     if (!socket.connected) socket.connect()
     socket.emit('login', { name })
-  }, [playerName])
+  }, [playerName, muted])
 
   // Handle restart
   const handleRestart = useCallback(() => {
+    if (!muted) getAudio()
     if (MOCK_MODE) {
       setMyScore(0)
       setScreen('game')
       return
     }
     socket.emit('restart')
-  }, [])
+  }, [muted])
 
   // Canvas rendering
   useEffect(() => {
@@ -626,132 +890,106 @@ export default function App() {
         return
       }
 
-      const camX = w / 2 - me.x
-      const camY = h / 2 - me.y
+      const zoom = zoomFromScore(me.score)
+      const invZ = 1 / zoom
+      const vb = worldViewBounds(me.x, me.y, w, h, zoom)
+
       ctx.save()
-      ctx.translate(camX, camY)
+      ctx.translate(w / 2, h / 2)
+      ctx.scale(zoom, zoom)
+      ctx.translate(-me.x, -me.y)
 
       // Water inside map
       ctx.fillStyle = '#67e8f9'
       ctx.fillRect(0, 0, MAP_SIZE, MAP_SIZE)
 
-      // Subtle checkerboard water pattern
+      // Subtle checkerboard water pattern — batch all rects into one fill call
       const gridSize = 80
-      ctx.fillStyle = 'rgba(14, 165, 233, 0.18)'
-      const startX = Math.floor(Math.max(0, -camX) / gridSize) * gridSize
-      const endX = Math.min(MAP_SIZE, -camX + w + gridSize)
-      const startY = Math.floor(Math.max(0, -camY) / gridSize) * gridSize
-      const endY = Math.min(MAP_SIZE, -camY + h + gridSize)
+      const startX = Math.floor(Math.max(0, vb.left) / gridSize) * gridSize
+      const endX = Math.min(MAP_SIZE, vb.right + gridSize)
+      const startY = Math.floor(Math.max(0, vb.top) / gridSize) * gridSize
+      const endY = Math.min(MAP_SIZE, vb.bottom + gridSize)
+      ctx.beginPath()
       for (let x = startX; x < endX; x += gridSize) {
         for (let y = startY; y < endY; y += gridSize) {
           if (((x / gridSize) + (y / gridSize)) % 2 === 0) {
-            ctx.fillRect(x, y, gridSize, gridSize)
+            ctx.rect(x, y, gridSize, gridSize)
           }
         }
       }
+      ctx.fillStyle = 'rgba(14, 165, 233, 0.18)'
+      ctx.fill()
 
-      // Sandy beach border
+      // Sandy beach border (compensate line width so it stays ~similar px when zoomed out)
       ctx.strokeStyle = '#f59e0b'
-      ctx.lineWidth = 20
+      ctx.lineWidth = Math.min(28, Math.max(10, 20 * invZ))
       ctx.strokeRect(0, 0, MAP_SIZE, MAP_SIZE)
       ctx.strokeStyle = '#fcd34d'
-      ctx.lineWidth = 6
+      ctx.lineWidth = Math.min(12, Math.max(4, 6 * invZ))
       ctx.strokeRect(0, 0, MAP_SIZE, MAP_SIZE)
 
-      // Bubble trail behind you (cosmetic)
-      if (me && Math.random() < 0.38) {
+      // Bubble trail behind you (world coords; r / lineWidth scaled by invZ so ~constant screen size when zoomed out)
+      if (me && Math.random() < 0.55) {
+        const pxR = 3.5 + Math.random() * 5.5
         bubblesRef.current.push({
-          x: me.x + (Math.random() - 0.5) * me.radius * 0.6,
-          y: me.y + me.radius * 0.4,
-          r: 2 + Math.random() * 5,
+          x: me.x + (Math.random() - 0.5) * me.radius * 0.65,
+          y: me.y + me.radius * 0.42,
+          r: pxR * invZ,
           life: 1,
         })
       }
-      bubblesRef.current = bubblesRef.current
-        .map(b => ({ ...b, life: b.life - 0.028 }))
-        .filter(b => b.life > 0)
-        .slice(-48)
-      for (const b of bubblesRef.current) {
+      const bubbles = bubblesRef.current
+      let bWrite = 0
+      for (let i = 0; i < bubbles.length; i++) {
+        bubbles[i].life -= 0.024
+        if (bubbles[i].life > 0) bubbles[bWrite++] = bubbles[i]
+      }
+      bubbles.length = Math.min(bWrite, 56)
+      const bubbleStroke = Math.max(1, 2.4 * invZ)
+      for (const b of bubbles) {
+        const a = Math.min(0.95, 0.2 + b.life * 0.55)
         ctx.beginPath()
         ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2)
-        ctx.strokeStyle = `rgba(255,255,255,${b.life * 0.42})`
-        ctx.lineWidth = 1.2
+        ctx.fillStyle = `rgba(255,255,255,${a * 0.22})`
+        ctx.fill()
+        ctx.strokeStyle = `rgba(255,255,255,${a * 0.75})`
+        ctx.lineWidth = bubbleStroke
         ctx.stroke()
       }
 
-      // Pellets — adam & nathan faces
-      const pImgs = pelletImgsRef.current
+      // Pellets — small: logo.jpg; gold (large): Adam or Nathan face + gold rings
+      const logoImg = pelletLogoRef.current
+      const faceImgs = pelletFaceImgsRef.current
       const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 220)
-      const superPulse = 0.5 + 0.5 * Math.sin(performance.now() / 160)
+      const PELLET_DRAW_MULT = 3
       for (const pellet of state.pellets) {
-        const isSuper = pellet.kind === 'super'
         const isGold = pellet.kind === 'gold'
-        const pr = pellet.radius * (isGold ? 3.4 : 3)
-        const glowPad = isSuper ? 40 : 12
-        if (pellet.x < -camX - pr - glowPad || pellet.x > -camX + w + pr + glowPad) continue
-        if (pellet.y < -camY - pr - glowPad || pellet.y > -camY + h + pr + glowPad) continue
+        const pr = pellet.radius * PELLET_DRAW_MULT
+        const px = pellet.x
+        const py = pellet.y
 
-        if (isSuper) {
-          const heroImg = avatarImgRef.current
-          const { x: sx, y: sy } = pellet
-          const outerR = pr + 10 + superPulse * 5
-          ctx.save()
-          ctx.beginPath()
-          ctx.arc(sx, sy, outerR, 0, Math.PI * 2)
-          const glowG = ctx.createRadialGradient(sx, sy, pr * 0.2, sx, sy, outerR)
-          glowG.addColorStop(0, `rgba(253, 224, 71, ${0.45 + superPulse * 0.35})`)
-          glowG.addColorStop(0.55, `rgba(245, 158, 11, ${0.22 + superPulse * 0.15})`)
-          glowG.addColorStop(1, 'rgba(251, 191, 36, 0)')
-          ctx.fillStyle = glowG
-          ctx.fill()
-          ctx.restore()
-
-          ctx.save()
-          ctx.shadowBlur = 22 + superPulse * 18
-          ctx.shadowColor = 'rgba(251, 191, 36, 0.9)'
-          if (heroImg) {
-            ctx.beginPath()
-            ctx.arc(sx, sy, pr, 0, Math.PI * 2)
-            ctx.clip()
-            const d = pr * 2
-            ctx.drawImage(heroImg, sx - pr, sy - pr, d, d)
-          } else {
-            ctx.beginPath()
-            ctx.arc(sx, sy, pr, 0, Math.PI * 2)
-            ctx.fillStyle = '#fde68a'
-            ctx.fill()
-          }
-          ctx.restore()
-
-          ctx.beginPath()
-          ctx.arc(sx, sy, pr + 3, 0, Math.PI * 2)
-          ctx.strokeStyle = `rgba(255, 255, 255, ${0.65 + superPulse * 0.25})`
-          ctx.lineWidth = 3
-          ctx.stroke()
-          ctx.beginPath()
-          ctx.arc(sx, sy, pr + 8 + superPulse * 3, 0, Math.PI * 2)
-          ctx.strokeStyle = `rgba(250, 204, 21, ${0.35 + superPulse * 0.2})`
-          ctx.lineWidth = 2
-          ctx.stroke()
-          continue
-        }
+        const glowPad = 12 * invZ
+        if (px < vb.left - pr - glowPad || px > vb.right + pr + glowPad) continue
+        if (py < vb.top - pr - glowPad || py > vb.bottom + pr + glowPad) continue
 
         const idx = pellet.imgIdx != null ? pellet.imgIdx : (pellet.id % 2)
-        const faceImg = !isGold && pImgs.length > 0 ? pImgs[idx % pImgs.length] : null
-        if (faceImg) {
+        const clipImg = isGold
+          ? faceImgs[idx % 2]
+          : logoImg
+        if (clipImg) {
           ctx.save()
           ctx.beginPath()
-          ctx.arc(pellet.x, pellet.y, pr, 0, Math.PI * 2)
+          ctx.arc(px, py, pr, 0, Math.PI * 2)
           ctx.clip()
           const d = pr * 2
-          ctx.drawImage(faceImg, pellet.x - pr, pellet.y - pr, d, d)
+          ctx.drawImage(clipImg, px - pr, py - pr, d, d)
           ctx.restore()
         } else {
           ctx.beginPath()
-          ctx.arc(pellet.x, pellet.y, pr, 0, Math.PI * 2)
+          ctx.arc(px, py, pr, 0, Math.PI * 2)
           const grd = ctx.createRadialGradient(
-            pellet.x - pr * 0.35, pellet.y - pr * 0.35, 0,
-            pellet.x, pellet.y, pr
+            px - pr * 0.35, py - pr * 0.35, 0,
+            px, py, pr
           )
           if (isGold) {
             grd.addColorStop(0, '#fff7c2')
@@ -765,13 +1003,13 @@ export default function App() {
           ctx.fill()
         }
         ctx.beginPath()
-        ctx.arc(pellet.x, pellet.y, pr, 0, Math.PI * 2)
+        ctx.arc(px, py, pr, 0, Math.PI * 2)
         ctx.strokeStyle = isGold ? `rgba(253, 224, 71, ${0.55 + pulse * 0.35})` : 'rgba(255,255,255,0.5)'
         ctx.lineWidth = isGold ? 2.2 : 1.5
         ctx.stroke()
         if (isGold) {
           ctx.beginPath()
-          ctx.arc(pellet.x, pellet.y, pr + 5 + pulse * 2, 0, Math.PI * 2)
+          ctx.arc(px, py, pr + 5 + pulse * 2, 0, Math.PI * 2)
           ctx.strokeStyle = `rgba(250, 204, 21, ${0.25 + pulse * 0.2})`
           ctx.lineWidth = 1.5
           ctx.stroke()
@@ -789,14 +1027,23 @@ export default function App() {
           ctx.beginPath()
           ctx.arc(player.x, player.y, player.radius + 6, 0, Math.PI * 2)
           ctx.strokeStyle = '#f59e0b'
-          ctx.lineWidth = 2.5
+          ctx.lineWidth = Math.min(5, Math.max(1.5, 2.5 * invZ))
           ctx.stroke()
           ctx.setLineDash([])
           ctx.restore()
         }
 
+        // Golden glow for Henry (no shadowBlur — too expensive; stroke ring only)
+        if (player.isHenry) {
+          ctx.beginPath()
+          ctx.arc(player.x, player.y, player.radius + 4, 0, Math.PI * 2)
+          ctx.strokeStyle = `rgba(250, 204, 21, ${0.5 + pulse * 0.3})`
+          ctx.lineWidth = 3
+          ctx.stroke()
+        }
+
         // Blob
-        const usePhoto = player.name === 'Player 1' && avatarImgRef.current
+        const usePhoto = player.isHenry && avatarImgRef.current
         ctx.save()
         ctx.beginPath()
         ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2)
@@ -811,8 +1058,8 @@ export default function App() {
         ctx.restore()
         ctx.beginPath()
         ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2)
-        ctx.strokeStyle = 'rgba(255,255,255,0.6)'
-        ctx.lineWidth = 3
+        ctx.strokeStyle = player.isHenry ? 'rgba(250, 204, 21, 0.7)' : 'rgba(255,255,255,0.6)'
+        ctx.lineWidth = Math.min(6, Math.max(1.5, 3 * invZ))
         ctx.stroke()
 
         if (!usePhoto) {
@@ -833,6 +1080,27 @@ export default function App() {
           ctx.fillStyle = 'rgba(255,255,255,0.35)'
           ctx.fill()
         }
+
+        // Name under each player
+        const displayName = isMe
+          ? (String(player.name || '').trim() || effectivePlayerName(playerNameRef.current) || 'Player')
+          : ((player.name && String(player.name).trim()) || 'Player')
+        const nameSize = Math.min(72, Math.max(8, player.radius * 0.4))
+        ctx.font = `bold ${nameSize}px Quicksand, sans-serif`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'top'
+        const nameX = Math.round(player.x)
+        const nameY = Math.round(player.y + player.radius + 4)
+        if (player.isHenry) {
+          ctx.fillStyle = '#fbbf24'
+          ctx.strokeStyle = 'rgba(0,0,0,0.5)'
+        } else {
+          ctx.fillStyle = 'rgba(255,255,255,0.95)'
+          ctx.strokeStyle = 'rgba(0,0,0,0.55)'
+        }
+        ctx.lineWidth = Math.max(2, nameSize * 0.11)
+        ctx.strokeText(displayName, nameX, nameY)
+        ctx.fillText(displayName, nameX, nameY)
 
       }
 
@@ -911,24 +1179,23 @@ export default function App() {
       ctx.strokeRect(mmX, mmY, mmSize, mmSize)
 
       for (const player of state.players) {
+        const baseR = player.radius * mmScale
+        const dotR = player.id === myIdRef.current
+          ? Math.max(2.5, Math.min(baseR * 1.08, mmSize * 0.42))
+          : Math.max(1.4, Math.min(baseR, mmSize * 0.4))
         ctx.beginPath()
-        ctx.arc(
-          mmX + player.x * mmScale,
-          mmY + player.y * mmScale,
-          player.id === myIdRef.current ? 4 : 2,
-          0, Math.PI * 2
-        )
+        ctx.arc(mmX + player.x * mmScale, mmY + player.y * mmScale, dotR, 0, Math.PI * 2)
         ctx.fillStyle = player.id === myIdRef.current ? '#f59e0b' : player.color
         ctx.fill()
       }
 
-      ctx.strokeStyle = 'rgba(0,0,0,0.3)'
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)'
       ctx.lineWidth = 1
       ctx.strokeRect(
-        mmX + (-camX) * mmScale,
-        mmY + (-camY) * mmScale,
-        w * mmScale,
-        h * mmScale
+        mmX + vb.left * mmScale,
+        mmY + vb.top * mmScale,
+        vb.vw * mmScale,
+        vb.vh * mmScale
       )
 
       animFrameRef.current = requestAnimationFrame(draw)
@@ -957,7 +1224,17 @@ export default function App() {
         const now = Date.now()
         if (now - lastEmitRef.current < 33) return
         lastEmitRef.current = now
-        socket.emit('playerMove', { x: dx, y: dy })
+        const me = gameStateRef.current.players.find(p => p.id === myIdRef.current)
+        if (me) {
+          const zoom = zoomFromScore(me.score)
+          socket.emit('playerMove', {
+            x: dx, y: dy,
+            cx: me.x, cy: me.y,
+            zoom, sw: window.innerWidth, sh: window.innerHeight,
+          })
+        } else {
+          socket.emit('playerMove', { x: dx, y: dy })
+        }
       }
     }
 

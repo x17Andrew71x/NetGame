@@ -1,0 +1,17 @@
+---
+description: After code changes, always build and run deploy-remote.sh; never wait for the user to ask.
+alwaysApply: true
+---
+
+# NetGame — deploy is part of every substantive change
+
+When you finish edits that affect the live game (**`src/`**, **`server/`**, **`public/`**, **`Dockerfile`**, build config, or deps used at build time):
+
+1. Run **`npm run build`** so `dist/index.html` matches source.
+2. Run **`./deploy-remote.sh`** from **Git Bash** at the repo root when Docker and `.env` (`DEPLOY_PASSWORD`, etc.) are available.
+
+Do **not** stop after only `npm run build`. Do **not** wait for the user to ask you to deploy.
+
+If deploy cannot run (no Docker, no `sshpass`, missing `.env`, or SSH failure after trying fixes), say what failed and give the exact commands the operator should run.
+
+See **[CLAUDE.md](CLAUDE.md)** — “Mandatory: deploy after changes”.

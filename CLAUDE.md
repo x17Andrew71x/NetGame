@@ -9,7 +9,7 @@ The client is a **single-page React app** built with Vite. **Game picker → per
 ## App flow (client)
 
 1. **Game picker** — Landing grid of game tiles. Only **NetGame** is wired; other tiles are “coming soon” and are not clickable.
-2. **NetGame login** — Name input (alphanumeric, max 15, stored in `localStorage`) + Play; optional **← All games** returns to the picker.
+2. **NetGame login** — Name input (letters, numbers, spaces, max 15, stored in `localStorage`) + Play; optional **← All games** returns to the picker.
 3. **Game** — Canvas + Socket.IO sync.
 4. **Dead** — Game over + Play again (still NetGame).
 
@@ -25,11 +25,24 @@ The client is a **single-page React app** built with Vite. **Game picker → per
 | Styles | `src/App.css` |
 | HTTP + Socket.IO + game tick | `server/index.js` |
 | Container image | `Dockerfile` — installs deps, `npm run build`, serves `dist` on port 3000, runs `node --expose-gc server/index.js` |
-| Remote deploy helper | `deploy-remote.sh` — reads **`DEPLOY_PASSWORD`** (and optional **`RESTART_TOKEN`**) from **`.env`** in the repo root; builds `linux/amd64`, saves/loads on VPS, runs container with `--network host`. Requires `sshpass`, Docker, and SSH. **Never commit `.env`** — use `.env.example` as a template. |
+| Remote deploy helper | `deploy-remote.sh` — reads **`.env`** from the repo root: **`DEPLOY_PASSWORD`** (required, SSH game VPS), optional **`RESTART_TOKEN`**, optional **`FTP_HOST` / `FTP_USER` / `FTP_PASS` / `FTP_FOLDER`** for a **separate static host**. Runs **`npm run build`**, then **Docker** `linux/amd64` deploy (`sshpass` + SSH), then **FTP** upload of **`dist/`** (prefers **`lftp`** `mirror -R --delete`; else **`python3`** `ftplib`, which does not remove remote orphans). Requires Docker, `sshpass`, **`python3`** when FTP is configured, and **`lftp`** for full mirror+delete. **Never commit `.env`** — use `.env.example`. |
 
 ## Build & deploy (required agent workflow)
 
 The assistant **must** keep artifacts in sync with source and **tell the operator when finished** (or what failed).
+
+### Mandatory: deploy after changes (do not wait to be asked)
+
+When a coding task touches **`src/`**, **`server/`**, **`public/`**, **`Dockerfile`**, **`vite.config.js`**, **`index.html`**, or **`package.json`** / lockfile in ways that affect the shipped client or server, the assistant **must** finish with a **full deploy** — not only `npm run build` — **without** the operator having to request deployment.
+
+1. Run **`npm run build`** (updates `dist/`).
+2. Run **`./deploy-remote.sh`** from **Git Bash** in the repo root when **Docker** is available and **`.env`** has **`DEPLOY_PASSWORD`** (and FTP vars if used). The script rebuilds the image, pushes to the VPS, and uploads `dist/` via FTP when configured.
+
+On Windows, if **`sshpass` is not on PATH**, download [sshpass-win32](https://github.com/xhcoding/sshpass-win32/releases) to e.g. `%TEMP%\sshpass.exe` and prepend that directory to **`PATH`** for the Git Bash session before running the script.
+
+**Only skip deploy** when it is impossible (no Docker, no network, missing secrets, or repeated failure after retries). In that case, say explicitly what the operator must run locally.
+
+The operator should **never** need to say “deploy this” for routine work — that is the agent’s responsibility at the end of the wave.
 
 ### Frontend changes → new `dist/`
 
@@ -56,6 +69,7 @@ After attempting these steps, the assistant should **explicitly confirm**: e.g. 
 ## Server behavior (summary)
 
 - Serves static files from `dist/` and runs a **~30 Hz** game loop: movement, pellets (including rare **gold** pellets), player eat logic, broadcasts `gameState`.
+- **Idle pause:** If there are **zero** Socket.IO clients, the game loop **does not run** (no movement, pellets, collisions, or broadcasts) so Henry and the world stay frozen and no CPU is spent until someone connects.
 - **Idle exit:** If there are **zero** Socket.IO clients for `IDLE_RESTART_MS` (default 15 minutes), the process exits so Docker can restart the container (fresh process memory).
 - **Maintenance HTTP:** `POST /__netgame/restart` with a valid `RESTART_TOKEN` (body or query) exits the process after responding; wrong token returns 404. Configure via container env vars — **never document real tokens in this file.**
 - Optional **manual GC** when Node is started with `--expose-gc` (enabled in Dockerfile).
